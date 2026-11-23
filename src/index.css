@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: var(--font-sans);
+    touch-action: none;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom subtle scrollbar for Field Journal */
+.journal-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.journal-scroll::-webkit-scrollbar-track {
+  background: rgba(43, 58, 44, 0.08);
+  border-radius: 3px;
+}
+.journal-scroll::-webkit-scrollbar-thumb {
+  background: rgba(43, 58, 44, 0.28);
+  border-radius: 3px;
+}
+.journal-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(43, 58, 44, 0.45);
+}
