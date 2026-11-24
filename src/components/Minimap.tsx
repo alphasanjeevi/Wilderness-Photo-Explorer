@@ -6,10 +6,11 @@ import {
   MAP_POIS,
   PLAYABLE_RADIUS,
 } from '../game/terrain';
-import { WorldHudTelemetry } from '../types/game';
+import { ScoutTarget, WorldHudTelemetry } from '../types/game';
 
 interface MinimapProps {
   telemetry: WorldHudTelemetry;
+  scoutTarget?: ScoutTarget | null;
 }
 
 const SIZE = 140;
@@ -18,7 +19,7 @@ const CLIP_R = 59;
 const MAP_RANGE_METERS = 105; // Local radar radius around player
 const SCALE = CLIP_R / MAP_RANGE_METERS;
 
-export const Minimap: React.FC<MinimapProps> = ({ telemetry }) => {
+export const Minimap: React.FC<MinimapProps> = ({ telemetry, scoutTarget }) => {
   const [headingUp, setHeadingUp] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -116,7 +117,7 @@ export const Minimap: React.FC<MinimapProps> = ({ telemetry }) => {
           width={SIZE}
           height={SIZE}
           viewBox={`0 0 ${SIZE} ${SIZE}`}
-          className="w-[116px] h-[116px] sm:w-[138px] sm:h-[138px] block"
+          className="w-[96px] h-[96px] sm:w-[138px] sm:h-[138px] block"
           aria-label="Reserve Minimap"
         >
           <defs>
@@ -236,6 +237,29 @@ export const Minimap: React.FC<MinimapProps> = ({ telemetry }) => {
                   </g>
                 );
               })}
+              {/* Scout Beacon Target (unlocked via Rewarded Ad) */}
+              {scoutTarget &&
+                (() => {
+                  const raw = projectRel(scoutTarget.x, scoutTarget.z);
+                  const rx = raw.x - CENTER;
+                  const ry = raw.y - CENTER;
+                  const distPx = Math.hypot(rx, ry);
+                  const maxRim = CLIP_R - 7;
+                  const clamped = distPx > maxRim;
+                  const px = clamped ? CENTER + (rx / distPx) * maxRim : raw.x;
+                  const py = clamped ? CENTER + (ry / distPx) * maxRim : raw.y;
+                  return (
+                    <g transform={`translate(${px.toFixed(1)}, ${py.toFixed(1)})`}>
+                      <circle r="7" fill="none" stroke="#F59E0B" strokeWidth="1.3" opacity="0.7" />
+                      <polygon
+                        points="0,-5 4.2,0 0,5 -4.2,0"
+                        fill="#F59E0B"
+                        stroke="#151E16"
+                        strokeWidth="1"
+                      />
+                    </g>
+                  );
+                })()}
             </g>
           </g>
 
@@ -292,7 +316,7 @@ export const Minimap: React.FC<MinimapProps> = ({ telemetry }) => {
           <button
             type="button"
             onClick={() => setHeadingUp((h) => !h)}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#253326] hover:bg-[#314432] text-[#F4EFE6] transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#253326] hover:bg-[#314432] text-[#F4EFE6] transition-colors cursor-pointer min-h-[28px]"
             title="Toggle between Rotating (Heading-Up) and North-Up map"
           >
             <Navigation className="w-2.5 h-2.5 text-[#E5B869]" />
@@ -302,7 +326,7 @@ export const Minimap: React.FC<MinimapProps> = ({ telemetry }) => {
           <button
             type="button"
             onClick={() => setCollapsed(true)}
-            className="p-0.5 rounded hover:bg-[#253326] text-[#D8D2C5]/75 hover:text-[#F4EFE6] cursor-pointer"
+            className="p-1 rounded hover:bg-[#253326] text-[#D8D2C5]/75 hover:text-[#F4EFE6] cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
             aria-label="Hide Minimap"
             title="Hide Minimap"
           >
@@ -310,6 +334,16 @@ export const Minimap: React.FC<MinimapProps> = ({ telemetry }) => {
           </button>
         </div>
       </div>
+
+      {scoutTarget && (
+        <div className="px-2.5 py-1 rounded-lg bg-[#182219]/92 border border-[#F59E0B]/45 text-[11px] text-[#F4EFE6] shadow-md max-w-[168px]">
+          <div className="font-medium text-[#F5B951] truncate">{scoutTarget.commonName}</div>
+          <div className="text-[10px] text-[#D8D2C5]/80 tabular-nums">
+            {Math.round(Math.hypot(scoutTarget.x - telemetry.jeepX, scoutTarget.z - telemetry.jeepZ))}m ·{' '}
+            {scoutTarget.habitatLabel}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

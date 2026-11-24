@@ -1,14 +1,23 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Lock, Trash2, X } from 'lucide-react';
+import { Check, Crosshair, Lock, LogIn, Trash2, X } from 'lucide-react';
 import { TROPICAL_SPECIES } from '../data/species';
-import { SaveState, SpeciesCategory, SpeciesDefinition } from '../types/game';
+import {
+  CrazyGamesUserProfile,
+  SaveState,
+  SpeciesCategory,
+  SpeciesDefinition,
+} from '../types/game';
 import { SpeciesIllustration } from './SpeciesIllustration';
 
 interface FieldJournalModalProps {
   saveState: SaveState;
   initialSpeciesId?: string | null;
+  user: CrazyGamesUserProfile | null;
+  userAccountAvailable: boolean;
   onClose: () => void;
   onDeletePhoto: (photoId: string) => void;
+  onSignIn: () => void;
+  onTrackSpecies: (speciesId: string) => void;
 }
 
 type CategoryFilter = 'all' | SpeciesCategory;
@@ -16,8 +25,12 @@ type CategoryFilter = 'all' | SpeciesCategory;
 export const FieldJournalModal: React.FC<FieldJournalModalProps> = ({
   saveState,
   initialSpeciesId,
+  user,
+  userAccountAvailable,
   onClose,
   onDeletePhoto,
+  onSignIn,
+  onTrackSpecies,
 }) => {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [onlyUnlocked, setOnlyUnlocked] = useState(false);
@@ -88,12 +101,29 @@ export const FieldJournalModal: React.FC<FieldJournalModalProps> = ({
             <h2 className="font-display text-2xl font-semibold text-[#1D261E] tracking-tight">
               Wildlife Field Journal
             </h2>
-            <div className="mt-0.5 flex items-center gap-2 text-xs text-[#556156]">
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-[#556156]">
               <span>Tropical Forest Reserve</span>
               <span aria-hidden="true">·</span>
               <span className="tabular-nums font-medium text-[#2B3A2C]">
                 {discoveredCount} of {TROPICAL_SPECIES.length} Species Discovered
               </span>
+              <span aria-hidden="true">·</span>
+              {user ? (
+                <span className="font-medium text-[#2B3A2C]">
+                  {user.username} (Cloud Synced)
+                </span>
+              ) : userAccountAvailable ? (
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  className="inline-flex items-center gap-1 font-medium text-[#B36019] hover:underline cursor-pointer"
+                >
+                  <LogIn className="w-3 h-3" />
+                  <span>Guest Mode · Sign In to Sync</span>
+                </button>
+              ) : (
+                <span>Local Explorer Save</span>
+              )}
               {discoveredCount === TROPICAL_SPECIES.length && (
                 <>
                   <span aria-hidden="true">·</span>
@@ -344,7 +374,7 @@ export const FieldJournalModal: React.FC<FieldJournalModalProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="mt-6 p-4 rounded-xl bg-[#EAE3D4] border border-[#2B3A2C]/10 text-sm text-[#49564A] space-y-2">
+              <div className="mt-6 p-4 rounded-xl bg-[#EAE3D4] border border-[#2B3A2C]/10 text-sm text-[#49564A] space-y-3">
                 <div className="font-semibold text-[#1D261E]">Field Scout Hint</div>
                 <p>
                   Look for this {categoryLabel(selectedSpecies.category).toLowerCase()} near{' '}
@@ -354,6 +384,14 @@ export const FieldJournalModal: React.FC<FieldJournalModalProps> = ({
                   {selectedSpecies.prefersWeather === 'rain' &&
                     ' Gentle rain showers often bring it closer to open trails.'}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => onTrackSpecies(selectedSpecies.id)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 min-h-[40px] rounded-lg bg-[#D9822B] hover:bg-[#E28F3A] text-[#1A1D16] font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  <span>Pin Location on Minimap (Watch Ad)</span>
+                </button>
               </div>
             )}
           </div>

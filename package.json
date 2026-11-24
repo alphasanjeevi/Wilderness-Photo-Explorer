@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist dist-webgl dist-webgl-tmp server.js",
     "lint": "tsc --noEmit",
-    "export:html": "node scripts/export-html.mjs"
+    "export:html": "node scripts/export-html.mjs",
+    "build:crazygames": "node scripts/export-html.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

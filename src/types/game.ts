@@ -92,6 +92,20 @@ export interface NearbyWildlifeBlip {
   category: SpeciesCategory;
 }
 
+export interface ScoutTarget {
+  speciesId: string;
+  commonName: string;
+  habitatLabel: string;
+  x: number;
+  z: number;
+  expiresAtMs: number;
+}
+
+export interface CrazyGamesUserProfile {
+  username: string;
+  profilePictureUrl: string;
+}
+
 export interface WorldHudTelemetry {
   speedKmh: number;
   headingDeg: number;
@@ -108,3 +122,4 @@ export interface WorldHudTelemetry {
   jeepYaw: number;
   nearbyWildlife: NearbyWildlifeBlip[];
 }
+

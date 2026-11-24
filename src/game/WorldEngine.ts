@@ -149,7 +149,8 @@ export class WorldEngine {
   private heldKeys = new Set<string>();
   private virtualThrottle = 0;
   private virtualSteer = 0;
-  private pointerDragging = false;
+  private virtualBrake = false;
+  private activeCanvasPointerId: number | null = null;
   private lastPointerX = 0;
   private lastPointerY = 0;
 
@@ -161,8 +162,8 @@ export class WorldEngine {
     this.callbacks = callbacks;
 
     this.cropCanvas = document.createElement('canvas');
-    this.cropCanvas.width = 480;
-    this.cropCanvas.height = 360;
+    this.cropCanvas.width = 400;
+    this.cropCanvas.height = 300;
 
     // 1. Software WebGL detection per Three.js skill
     this.isSoftwareGl = (() => {
@@ -175,6 +176,10 @@ export class WorldEngine {
       return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
     })();
 
+    const isCoarseTouch =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)')?.matches || navigator.maxTouchPoints > 0);
+
     // 2. Renderer
     this.renderer = new THREE.WebGLRenderer({
       antialias: !this.isSoftwareGl,
@@ -184,7 +189,7 @@ export class WorldEngine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
     this.renderer.setPixelRatio(
-      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2)
+      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, isCoarseTouch ? 1.75 : 2)
     );
     this.renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
@@ -352,12 +357,20 @@ export class WorldEngine {
     canvas.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerUp);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('webglcontextlost', this.onContextLost);
+    canvas.addEventListener('webglcontextrestored', this.onContextRestored);
   }
 
   private onContextLost = (e: Event): void => {
     e.preventDefault();
+  };
+
+  private onContextRestored = (): void => {
+    if (!this.disposed && !this.isSoftwareGl) {
+      this.renderer.compile(this.scene, this.camera);
+    }
   };
 
   private onResize = (): void => {
@@ -373,7 +386,8 @@ export class WorldEngine {
     this.heldKeys.clear();
     this.virtualThrottle = 0;
     this.virtualSteer = 0;
-    this.pointerDragging = false;
+    this.virtualBrake = false;
+    this.activeCanvasPointerId = null;
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -387,25 +401,27 @@ export class WorldEngine {
 
   private onPointerDown = (e: PointerEvent): void => {
     if (this.phase === 'playing' || this.phase === 'photo') {
-      this.pointerDragging = true;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
+      if (this.activeCanvasPointerId === null) {
+        this.activeCanvasPointerId = e.pointerId;
+        this.lastPointerX = e.clientX;
+        this.lastPointerY = e.clientY;
+      }
     }
   };
 
   private onPointerMove = (e: PointerEvent): void => {
     if (this.phase === 'photo') {
-      const dx = e.movementX || (this.pointerDragging ? e.clientX - this.lastPointerX : 0);
-      const dy = e.movementY || (this.pointerDragging ? e.clientY - this.lastPointerY : 0);
-      if (this.pointerDragging || document.pointerLockElement === this.renderer.domElement) {
-        this.addCameraLookDelta(dx, dy);
-      } else if (Math.abs(dx) < 80 && Math.abs(dy) < 80) {
-        // Gentle hover aim in photo mode on desktop without requiring drag
-        this.addCameraLookDelta(dx * 0.55, dy * 0.55);
+      // CameraOverlay handles pointer drag/touch aim via capture; avoid double-applying on drag/touch
+      if (e.pointerType === 'mouse' && e.buttons === 0 && e.target === this.renderer.domElement) {
+        const dx = e.movementX || e.clientX - this.lastPointerX;
+        const dy = e.movementY || e.clientY - this.lastPointerY;
+        if (Math.abs(dx) < 80 && Math.abs(dy) < 80) {
+          this.addCameraLookDelta(dx * 0.55, dy * 0.55);
+        }
+        this.lastPointerX = e.clientX;
+        this.lastPointerY = e.clientY;
       }
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
-    } else if (this.phase === 'playing' && this.pointerDragging) {
+    } else if (this.phase === 'playing' && this.activeCanvasPointerId === e.pointerId) {
       const dx = e.clientX - this.lastPointerX;
       this.chaseYawOffset = THREE.MathUtils.clamp(
         this.chaseYawOffset - dx * 0.0045 * this.cameraSensitivity,
@@ -417,8 +433,10 @@ export class WorldEngine {
     }
   };
 
-  private onPointerUp = (): void => {
-    this.pointerDragging = false;
+  private onPointerUp = (e: PointerEvent): void => {
+    if (this.activeCanvasPointerId === e.pointerId) {
+      this.activeCanvasPointerId = null;
+    }
   };
 
   private onWheel = (e: WheelEvent): void => {
@@ -437,6 +455,10 @@ export class WorldEngine {
   public setVirtualInput(throttle: number, steer: number): void {
     this.virtualThrottle = THREE.MathUtils.clamp(throttle, -1, 1);
     this.virtualSteer = THREE.MathUtils.clamp(steer, -1, 1);
+  }
+
+  public setVirtualBrake(active: boolean): void {
+    this.virtualBrake = active;
   }
 
   public setPhase(next: GamePhase): void {
@@ -490,6 +512,59 @@ export class WorldEngine {
     }
   }
 
+  public getScoutTarget(
+    unlockedSpeciesIds: Set<string>,
+    preferredSpeciesId?: string | null
+  ): {
+    speciesId: string;
+    commonName: string;
+    habitatLabel: string;
+    x: number;
+    z: number;
+  } | null {
+    if (preferredSpeciesId) {
+      let bestMatch: WildlifeActor | null = null;
+      let bestDist = Infinity;
+      for (const a of this.actors) {
+        if (a.species.id !== preferredSpeciesId) continue;
+        const d = Math.hypot(a.x - this.jeepX, a.z - this.jeepZ);
+        if (d < bestDist) {
+          bestDist = d;
+          bestMatch = a;
+        }
+      }
+      if (bestMatch) {
+        return {
+          speciesId: bestMatch.species.id,
+          commonName: bestMatch.species.commonName,
+          habitatLabel: bestMatch.species.habitatLabel,
+          x: bestMatch.x,
+          z: bestMatch.z,
+        };
+      }
+    }
+
+    let nearestActor: WildlifeActor | null = null;
+    let nearestDist = Infinity;
+    for (const a of this.actors) {
+      if (unlockedSpeciesIds.has(a.species.id)) continue;
+      const d = Math.hypot(a.x - this.jeepX, a.z - this.jeepZ);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestActor = a;
+      }
+    }
+
+    if (!nearestActor) return null;
+    return {
+      speciesId: nearestActor.species.id,
+      commonName: nearestActor.species.commonName,
+      habitatLabel: nearestActor.species.habitatLabel,
+      x: nearestActor.x,
+      z: nearestActor.z,
+    };
+  }
+
   public resetJeepToCamp(): void {
     this.jeepX = 0;
     this.jeepZ = 5;
@@ -531,7 +606,7 @@ export class WorldEngine {
       this.cropCanvas.height
     );
 
-    const dataUrl = this.cropCanvas.toDataURL('image/jpeg', 0.85);
+    const dataUrl = this.cropCanvas.toDataURL('image/jpeg', 0.72);
     const focus = this.evaluateFocusTarget(0, true);
     if (!focus) {
       return {
@@ -743,7 +818,7 @@ export class WorldEngine {
       (this.heldKeys.has('KeyA') || this.heldKeys.has('ArrowLeft') ? 1 : 0) -
       (this.heldKeys.has('KeyD') || this.heldKeys.has('ArrowRight') ? 1 : 0) +
       this.virtualSteer;
-    const braking = this.heldKeys.has('Space');
+    const braking = this.heldKeys.has('Space') || this.virtualBrake;
 
     const clampedThrottle = THREE.MathUtils.clamp(forwardInput, -1, 1);
     const clampedSteer = THREE.MathUtils.clamp(steerInput, -1, 1);
@@ -1189,11 +1264,13 @@ export class WorldEngine {
     window.removeEventListener('blur', this.onBlur);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerUp);
 
     const canvas = this.renderer.domElement;
     canvas.removeEventListener('pointerdown', this.onPointerDown);
     canvas.removeEventListener('wheel', this.onWheel);
     canvas.removeEventListener('webglcontextlost', this.onContextLost);
+    canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
 
     this.scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Points) {

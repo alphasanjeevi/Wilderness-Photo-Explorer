@@ -10,14 +10,31 @@ class SoundEngine {
   private engineFilter: BiquadFilterNode | null = null;
   private chirpTimer: number | null = null;
   private muted = false;
+  private adPaused = false;
   private started = false;
   private currentWeather: WeatherType = 'clear';
   private currentTimeNorm = 0.35;
 
+  private syncMasterGain(): void {
+    if (!this.masterGain || !this.ctx) return;
+    const effectiveMuted = this.muted || this.adPaused;
+    this.masterGain.gain.setTargetAtTime(effectiveMuted ? 0 : 0.55, this.ctx.currentTime, 0.06);
+  }
+
   public setMuted(muted: boolean): void {
     this.muted = muted;
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.55, this.ctx.currentTime, 0.08);
+    this.syncMasterGain();
+  }
+
+  public setAdPaused(paused: boolean): void {
+    this.adPaused = paused;
+    this.syncMasterGain();
+    if (this.ctx) {
+      if (paused && this.ctx.state === 'running') {
+        void this.ctx.suspend();
+      } else if (!paused && !this.muted && this.ctx.state === 'suspended') {
+        void this.ctx.resume();
+      }
     }
   }
 
@@ -34,14 +51,14 @@ class SoundEngine {
       if (!AudioCtx) return;
       this.ctx = new AudioCtx();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.muted ? 0 : 0.55;
+      this.masterGain.gain.value = this.muted || this.adPaused ? 0 : 0.55;
       this.masterGain.connect(this.ctx.destination);
       this.setupAmbience();
       this.setupEngine();
       this.scheduleNextBirdChirp();
       this.started = true;
     }
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx.state === 'suspended' && !this.adPaused) {
       void this.ctx.resume();
     }
   }
@@ -146,7 +163,7 @@ class SoundEngine {
   }
 
   private playAmbientWildlifeCall(): void {
-    if (!this.ctx || !this.masterGain || this.muted || this.ctx.state !== 'running') return;
+    if (!this.ctx || !this.masterGain || this.muted || this.adPaused || this.ctx.state !== 'running') return;
     if (this.currentWeather === 'rainy' && Math.random() < 0.55) return;
 
     const now = this.ctx.currentTime;
@@ -192,7 +209,7 @@ class SoundEngine {
 
   public playFocusLock(): void {
     this.unlockAndStart();
-    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (!this.ctx || !this.masterGain || this.muted || this.adPaused) return;
     const now = this.ctx.currentTime;
     const notes = [880, 1174.66];
     notes.forEach((freq, idx) => {
@@ -213,7 +230,7 @@ class SoundEngine {
 
   public playShutterClick(): void {
     this.unlockAndStart();
-    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (!this.ctx || !this.masterGain || this.muted || this.adPaused) return;
     const now = this.ctx.currentTime;
 
     // Crisp mechanical shutter transient
@@ -252,7 +269,7 @@ class SoundEngine {
 
   public playSpeciesUnlock(): void {
     this.unlockAndStart();
-    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (!this.ctx || !this.masterGain || this.muted || this.adPaused) return;
     const now = this.ctx.currentTime;
     const chord = [523.25, 659.25, 783.99, 1046.5];
     chord.forEach((freq, idx) => {
@@ -274,7 +291,7 @@ class SoundEngine {
 
   public playHorn(): void {
     this.unlockAndStart();
-    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (!this.ctx || !this.masterGain || this.muted || this.adPaused) return;
     const now = this.ctx.currentTime;
     [392, 493.88].forEach((freq) => {
       if (!this.ctx || !this.masterGain) return;
@@ -294,7 +311,7 @@ class SoundEngine {
 
   public playBump(strength = 1): void {
     this.unlockAndStart();
-    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (!this.ctx || !this.masterGain || this.muted || this.adPaused) return;
     const now = this.ctx.currentTime;
     const vol = Math.min(0.18, 0.04 + strength * 0.025);
     const osc = this.ctx.createOscillator();
