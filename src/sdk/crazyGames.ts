@@ -7,7 +7,7 @@ export interface AdRequestResult {
   reason?: string;
 }
 
-interface CrazyGamesRawSDK {
+export interface CrazyGamesRawSDK {
   environment?: 'crazygames' | 'local' | 'disabled';
   init: () => Promise<void>;
   game: {
@@ -58,6 +58,7 @@ class CrazyGamesClient {
   private loadingStopped = false;
   private gameplayActive = false;
   private adPlaying = false;
+  private rewardedAdsDisabled = false;
   private lastMidgameAtMs = 0;
   private currentUser: CrazyGamesUserProfile | null = null;
   private authListeners = new Set<(user: CrazyGamesUserProfile | null) => void>();
@@ -72,10 +73,19 @@ class CrazyGamesClient {
     return this.initialized && this.sdkAvailable;
   }
 
+  public isUsingSdkData(): boolean {
+    const sdk = this.getRawSdk();
+    return Boolean(this.initialized && this.sdkAvailable && sdk?.data);
+  }
+
   public getEnvironment(): 'crazygames' | 'local' | 'disabled' {
     const sdk = this.getRawSdk();
     if (!sdk || !this.sdkAvailable) return 'disabled';
     return sdk.environment ?? 'crazygames';
+  }
+
+  public isRewardedAdAvailable(): boolean {
+    return this.initialized && this.sdkAvailable && !this.rewardedAdsDisabled;
   }
 
   public isUserAccountAvailable(): boolean {
@@ -96,13 +106,28 @@ class CrazyGamesClient {
     return this.currentUser;
   }
 
-  public getUserStorageScope(): string {
-    if (!this.currentUser?.username) return 'guest';
-    const clean = this.currentUser.username
+  public getUserStorageScope(user: CrazyGamesUserProfile | null = this.currentUser): string {
+    if (!user?.username) return 'guest';
+    const clean = user.username
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, '_')
       .slice(0, 48);
     return clean ? `user_${clean}` : 'guest';
+  }
+
+  public resetForTest(): void {
+    this.initialized = false;
+    this.initPromise = null;
+    this.sdkAvailable = false;
+    this.loadingStarted = false;
+    this.loadingStopped = false;
+    this.gameplayActive = false;
+    this.adPlaying = false;
+    this.rewardedAdsDisabled = false;
+    this.lastMidgameAtMs = 0;
+    this.currentUser = null;
+    this.rawAuthListenerBound = false;
+    this.authListeners.clear();
   }
 
   public async init(): Promise<CrazyGamesUserProfile | null> {
@@ -116,6 +141,7 @@ class CrazyGamesClient {
       if (!sdk) {
         this.initialized = true;
         this.sdkAvailable = false;
+        this.rewardedAdsDisabled = true;
         return;
       }
 
@@ -132,12 +158,13 @@ class CrazyGamesClient {
         await Promise.race([
           sdk.init(),
           new Promise<never>((_, reject) =>
-            window.setTimeout(() => reject(new Error('CrazyGames SDK init timeout')), 3500)
+            setTimeout(() => reject(new Error('CrazyGames SDK init timeout')), 3500)
           ),
         ]);
         const env = sdk.environment;
         this.sdkAvailable = env !== 'disabled';
         this.initialized = true;
+        this.rewardedAdsDisabled = !this.sdkAvailable;
 
         if (this.sdkAvailable && sdk.user) {
           if (!this.rawAuthListenerBound && sdk.user.addAuthListener) {
@@ -162,6 +189,7 @@ class CrazyGamesClient {
       } catch {
         this.initialized = true;
         this.sdkAvailable = false;
+        this.rewardedAdsDisabled = true;
         this.currentUser = null;
       }
     })();
@@ -255,13 +283,15 @@ class CrazyGamesClient {
 
     const sdk = this.getRawSdk();
     if (!sdk || !this.sdkAvailable || !sdk.ad?.requestAd) {
+      if (type === 'rewarded') {
+        this.rewardedAdsDisabled = true;
+      }
       return {
         completed: type === 'midgame',
         reason: type === 'midgame' ? 'skipped_offline' : 'unavailable',
       };
     }
 
-    // Respect gentle pacing for midgame breaks (CrazyGames also manages cooldowns internally)
     if (type === 'midgame') {
       const now = Date.now();
       if (now - this.lastMidgameAtMs < 45_000) {
@@ -295,6 +325,12 @@ class CrazyGamesClient {
               typeof error === 'object' && error !== null && 'code' in error
                 ? String((error as { code?: unknown }).code)
                 : String(error ?? 'adError');
+            if (
+              type === 'rewarded' &&
+              (reason === 'adsDisabled' || reason === 'adsNotEnabled' || reason === 'unavailable')
+            ) {
+              this.rewardedAdsDisabled = true;
+            }
             finish({ completed: false, reason });
           },
         });
@@ -305,15 +341,15 @@ class CrazyGamesClient {
   }
 
   public dataGetItem(key: string): string | null {
-    const sdk = this.getRawSdk();
-    if (sdk && this.sdkAvailable && sdk.data?.getItem) {
+    // Exclusively use CrazyGames SDK Data module when running on CrazyGames / local QA
+    if (this.isUsingSdkData()) {
       try {
-        const sdkVal = sdk.data.getItem(key);
-        if (sdkVal !== null) return sdkVal;
+        return this.getRawSdk()!.data.getItem(key);
       } catch {
-        // Fallback below
+        return null;
       }
     }
+
     if (typeof window === 'undefined') return null;
     try {
       return window.localStorage.getItem(key);
@@ -323,42 +359,40 @@ class CrazyGamesClient {
   }
 
   public dataSetItem(key: string, value: string): boolean {
-    let saved = false;
-    const sdk = this.getRawSdk();
-    if (sdk && this.sdkAvailable && sdk.data?.setItem) {
+    // Exclusively use CrazyGames SDK Data module when running on CrazyGames / local QA (no duplicate localStorage writes)
+    if (this.isUsingSdkData()) {
       try {
-        sdk.data.setItem(key, value);
-        saved = true;
+        this.getRawSdk()!.data.setItem(key, value);
+        return true;
       } catch {
-        // Fall through to localStorage
+        return false;
       }
     }
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.setItem(key, value);
-        saved = true;
-      } catch {
-        // Ignore quota failure; caller trims when needed
-      }
+
+    if (typeof window === 'undefined') return false;
+    try {
+      window.localStorage.setItem(key, value);
+      return true;
+    } catch {
+      return false;
     }
-    return saved;
   }
 
   public dataRemoveItem(key: string): void {
-    const sdk = this.getRawSdk();
-    if (sdk && this.sdkAvailable && sdk.data?.removeItem) {
+    if (this.isUsingSdkData()) {
       try {
-        sdk.data.removeItem(key);
+        this.getRawSdk()!.data.removeItem(key);
       } catch {
         // Ignore
       }
+      return;
     }
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem(key);
-      } catch {
-        // Ignore
-      }
+
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Ignore
     }
   }
 }

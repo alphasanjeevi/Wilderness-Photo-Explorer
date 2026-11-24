@@ -24,6 +24,8 @@ interface DrivingHudProps {
   showTouchControls: boolean;
   scoutTarget?: ScoutTarget | null;
   canScoutMore: boolean;
+  rewardedAdAvailable: boolean;
+  scoutCooldownSec: number;
   onEnterPhotoMode: () => void;
   onOpenJournal: () => void;
   onPause: () => void;
@@ -44,6 +46,8 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
   showTouchControls,
   scoutTarget,
   canScoutMore,
+  rewardedAdAvailable,
+  scoutCooldownSec,
   onEnterPhotoMode,
   onOpenJournal,
   onPause,
@@ -151,12 +155,27 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
           {canScoutMore && !scoutTarget && (
             <button
               type="button"
+              disabled={!rewardedAdAvailable && scoutCooldownSec > 0}
               onClick={onRequestScoutBeacon}
-              className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] rounded-xl bg-[#182219]/90 hover:bg-[#243226] border border-[#E5B869]/30 text-[11px] font-medium text-[#E5B869] shadow-md transition-colors cursor-pointer"
-              title="Watch a short ad to reveal the nearest undiscovered species on your minimap"
+              className={`pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] rounded-xl bg-[#182219]/90 border text-[11px] font-medium shadow-md transition-colors ${
+                !rewardedAdAvailable && scoutCooldownSec > 0
+                  ? 'border-[#F4EFE6]/15 text-[#D8D2C5]/60 cursor-not-allowed'
+                  : 'hover:bg-[#243226] border-[#E5B869]/30 text-[#E5B869] cursor-pointer'
+              }`}
+              title={
+                rewardedAdAvailable
+                  ? 'Watch a short ad to reveal the nearest undiscovered species on your minimap'
+                  : 'Send a free field pulse to locate the nearest undiscovered species on your minimap'
+              }
             >
               <Crosshair className="w-3.5 h-3.5" />
-              <span>Scout Beacon (Ad)</span>
+              <span className="tabular-nums">
+                {rewardedAdAvailable
+                  ? 'Scout Beacon (Ad)'
+                  : scoutCooldownSec > 0
+                    ? `Scout Pulse · ${scoutCooldownSec}s`
+                    : 'Scout Pulse'}
+              </span>
             </button>
           )}
         </div>

@@ -9,7 +9,9 @@ import { TROPICAL_SPECIES } from './data/species';
 import { WorldEngine } from './game/WorldEngine';
 import { crazyGames } from './sdk/crazyGames';
 import {
+  clearGuestSessionData,
   clearSaveState,
+  createDefaultSaveState,
   detectTouchDevice,
   loadSaveState,
   mergeSaveStates,
@@ -46,6 +48,8 @@ const INITIAL_TELEMETRY: WorldHudTelemetry = {
   nearbyWildlife: [],
 };
 
+const SCOUT_FALLBACK_COOLDOWN_MS = 90_000;
+
 interface CaptureBannerState {
   photo: CapturedPhoto;
   speciesName: string | null;
@@ -61,15 +65,19 @@ export default function App() {
   const [isTouchDevice] = useState<boolean>(() => detectTouchDevice());
   const [cgUser, setCgUser] = useState<CrazyGamesUserProfile | null>(null);
   const [userAccountAvailable, setUserAccountAvailable] = useState(false);
+  const [rewardedAdAvailable, setRewardedAdAvailable] = useState(false);
   const [userScope, setUserScope] = useState<string>('guest');
 
-  const [saveState, setSaveState] = useState<SaveState>(() => loadSaveState('guest'));
+  // Start with in-memory default state until CrazyGames SDK.init() completes so localStorage is never touched on CrazyGames
+  const [saveState, setSaveState] = useState<SaveState>(() => createDefaultSaveState());
   const [phase, setPhase] = useState<GamePhase>('title');
   const [journalOpen, setJournalOpen] = useState(false);
   const [journalInitialSpecies, setJournalInitialSpecies] = useState<string | null>(null);
   const [adPlaying, setAdPlaying] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [scoutTarget, setScoutTarget] = useState<ScoutTarget | null>(null);
+  const [scoutCooldownUntilMs, setScoutCooldownUntilMs] = useState<number>(0);
+  const [scoutCooldownSec, setScoutCooldownSec] = useState<number>(0);
 
   const [telemetry, setTelemetry] = useState<WorldHudTelemetry>(INITIAL_TELEMETRY);
   const [focus, setFocus] = useState<FocusTargetInfo | null>(null);
@@ -82,6 +90,7 @@ export default function App() {
   const adPlayingRef = useRef<boolean>(adPlaying);
   const saveStateRef = useRef<SaveState>(saveState);
   const userScopeRef = useRef<string>(userScope);
+  const sdkInitializedRef = useRef<boolean>(false);
 
   phaseRef.current = phase;
   journalOpenRef.current = journalOpen;
@@ -93,7 +102,7 @@ export default function App() {
     setStatusNotice(msg);
     window.setTimeout(() => {
       setStatusNotice((curr) => (curr === msg ? null : curr));
-    }, 3600);
+    }, 3800);
   }, []);
 
   const discoveredCount = useMemo(
@@ -102,26 +111,46 @@ export default function App() {
   );
 
   const applyUserScopeSave = useCallback((nextUser: CrazyGamesUserProfile | null) => {
-    const nextScope = crazyGames.getUserStorageScope();
+    const nextScope = crazyGames.getUserStorageScope(nextUser);
     const prevScope = userScopeRef.current;
 
     setCgUser(nextUser);
     setUserAccountAvailable(crazyGames.isUserAccountAvailable());
 
-    if (nextScope !== prevScope) {
-      const targetSave = loadSaveState(nextScope);
-      const merged =
-        prevScope === 'guest'
-          ? mergeSaveStates(targetSave, saveStateRef.current)
-          : targetSave;
-
-      persistSaveState(merged, nextScope);
-      setUserScope(nextScope);
-      setSaveState(merged);
-      soundEngine.setMuted(merged.settings.muted);
-      engineRef.current?.setAutoTimeCycle(merged.settings.autoTimeCycle);
-      engineRef.current?.setCameraSensitivity(merged.settings.cameraSensitivity);
+    if (nextScope === prevScope) {
+      const reloaded = loadSaveState(nextScope);
+      saveStateRef.current = reloaded;
+      setSaveState(reloaded);
+      soundEngine.setMuted(reloaded.settings.muted);
+      engineRef.current?.setAutoTimeCycle(reloaded.settings.autoTimeCycle);
+      engineRef.current?.setCameraSensitivity(reloaded.settings.cameraSensitivity);
+      return;
     }
+
+    const targetSave = loadSaveState(nextScope);
+    const guestHadProgress =
+      prevScope === 'guest' &&
+      (saveStateRef.current.photos.length > 0 ||
+        Object.values(saveStateRef.current.progress).some((p) => p.unlocked));
+
+    const nextSave =
+      prevScope === 'guest' && nextScope !== 'guest' && guestHadProgress
+        ? mergeSaveStates(targetSave, saveStateRef.current)
+        : targetSave;
+
+    if (prevScope === 'guest' && nextScope !== 'guest' && guestHadProgress) {
+      persistSaveState(nextSave, nextScope);
+      clearGuestSessionData();
+    }
+
+    userScopeRef.current = nextScope;
+    saveStateRef.current = nextSave;
+    setUserScope(nextScope);
+    setSaveState(nextSave);
+    setScoutTarget(null);
+    soundEngine.setMuted(nextSave.settings.muted);
+    engineRef.current?.setAutoTimeCycle(nextSave.settings.autoTimeCycle);
+    engineRef.current?.setCameraSensitivity(nextSave.settings.cameraSensitivity);
   }, []);
 
   // Initialize Three.js WorldEngine once in isolated canvas container
@@ -141,6 +170,9 @@ export default function App() {
 
     engineRef.current = engine;
     engineReadyRef.current = true;
+    if (sdkInitializedRef.current) {
+      crazyGames.notifyLoadingStop();
+    }
 
     return () => {
       engine.dispose();
@@ -149,7 +181,7 @@ export default function App() {
     };
   }, []);
 
-  // Initialize CrazyGames SDK v3 (loading lifecycle, user profile, cloud data sync)
+  // Initialize CrazyGames SDK v3 (loading lifecycle, user profile, exclusive SDK.data load)
   useEffect(() => {
     let mounted = true;
 
@@ -160,16 +192,11 @@ export default function App() {
 
     void crazyGames.init().then((user) => {
       if (!mounted) return;
+      sdkInitializedRef.current = true;
       setUserAccountAvailable(crazyGames.isUserAccountAvailable());
-      if (user) {
-        applyUserScopeSave(user);
-      } else {
-        const guestReloaded = loadSaveState('guest');
-        setSaveState(guestReloaded);
-        soundEngine.setMuted(guestReloaded.settings.muted);
-        engineRef.current?.setAutoTimeCycle(guestReloaded.settings.autoTimeCycle);
-        engineRef.current?.setCameraSensitivity(guestReloaded.settings.cameraSensitivity);
-      }
+      setRewardedAdAvailable(crazyGames.isRewardedAdAvailable());
+      applyUserScopeSave(user);
+
       if (engineReadyRef.current) {
         crazyGames.notifyLoadingStop();
       }
@@ -180,6 +207,21 @@ export default function App() {
       unsubscribe();
     };
   }, [applyUserScopeSave]);
+
+  // Update fallback Scout Pulse cooldown countdown
+  useEffect(() => {
+    if (scoutCooldownUntilMs <= Date.now()) {
+      setScoutCooldownSec(0);
+      return;
+    }
+    const updateTick = () => {
+      const rem = Math.max(0, Math.ceil((scoutCooldownUntilMs - Date.now()) / 1000));
+      setScoutCooldownSec(rem);
+    };
+    updateTick();
+    const id = window.setInterval(updateTick, 1000);
+    return () => window.clearInterval(id);
+  }, [scoutCooldownUntilMs]);
 
   // Unlock Web Audio cleanly on first touch/pointer gesture (especially iOS Safari)
   useEffect(() => {
@@ -294,6 +336,30 @@ export default function App() {
         return;
       }
 
+      const activateScoutPin = (withCooldown: boolean) => {
+        setScoutTarget({
+          ...candidate,
+          expiresAtMs: Date.now() + 90_000,
+        });
+        if (withCooldown) {
+          setScoutCooldownUntilMs(Date.now() + SCOUT_FALLBACK_COOLDOWN_MS);
+        }
+        setJournalOpen(false);
+        setPhase('playing');
+        showNotice(`Scout Beacon active for ${candidate.commonName} (${candidate.habitatLabel})`);
+      };
+
+      // Basic Launch / offline fallback: no ad request needed, uses 90s Scout Pulse cooldown
+      if (!crazyGames.isRewardedAdAvailable()) {
+        if (scoutCooldownUntilMs > Date.now()) {
+          const sec = Math.ceil((scoutCooldownUntilMs - Date.now()) / 1000);
+          showNotice(`Scout Pulse recharging (${sec}s remaining).`);
+          return;
+        }
+        activateScoutPin(true);
+        return;
+      }
+
       const res = await crazyGames.requestAd('rewarded', {
         onAdStart: () => {
           setAdPlaying(true);
@@ -305,23 +371,25 @@ export default function App() {
         },
       });
 
+      setRewardedAdAvailable(crazyGames.isRewardedAdAvailable());
+
       if (res.completed) {
-        setScoutTarget({
-          ...candidate,
-          expiresAtMs: Date.now() + 90_000,
-        });
-        setJournalOpen(false);
-        setPhase('playing');
-        showNotice(`Scout Beacon active for ${candidate.commonName} (${candidate.habitatLabel})`);
+        activateScoutPin(false);
+      } else if (
+        res.reason === 'adsDisabled' ||
+        res.reason === 'adsNotEnabled' ||
+        res.reason === 'unavailable'
+      ) {
+        // Basic Launch disables rewarded ads -> seamlessly transition to Scout Pulse fallback
+        activateScoutPin(true);
+      } else if (res.reason === 'adblock') {
+        showNotice('Ad blocked — disable ad blocker for Scout Beacon, or follow nearby tracks!');
       } else {
-        showNotice(
-          res.reason === 'unavailable'
-            ? 'Rewarded Scout ads are active on CrazyGames. Explore the river & canopy!'
-            : 'Ad unavailable right now — try again shortly.'
-        );
+        // Unfilled or skipped -> provide non-spoiling habitat clue without granting GPS beacon
+        showNotice(`Field Tip: Search near ${candidate.habitatLabel} for ${candidate.commonName}.`);
       }
     },
-    [showNotice]
+    [scoutCooldownUntilMs, showNotice]
   );
 
   const handleShutter = useCallback(() => {
@@ -346,6 +414,7 @@ export default function App() {
         photo,
         userScopeRef.current
       );
+      saveStateRef.current = nextState;
       setSaveState(nextState);
 
       if (scoutTarget?.speciesId === photo.speciesId) {
@@ -355,7 +424,12 @@ export default function App() {
       if (isNewSpecies) {
         soundEngine.playSpeciesUnlock();
         const nextTotal = prevCount + 1;
-        if (nextTotal === 5 || nextTotal === 10 || nextTotal === 15 || nextTotal === TROPICAL_SPECIES.length) {
+        if (
+          nextTotal === 5 ||
+          nextTotal === 10 ||
+          nextTotal === 15 ||
+          nextTotal === TROPICAL_SPECIES.length
+        ) {
           crazyGames.triggerHappytime();
         }
         if (nextTotal === TROPICAL_SPECIES.length) {
@@ -376,6 +450,7 @@ export default function App() {
         photos: [photo, ...saveStateRef.current.photos].slice(0, 36),
       };
       persistSaveState(nextState, userScopeRef.current);
+      saveStateRef.current = nextState;
       setSaveState(nextState);
       setLastCaptureBanner({
         photo,
@@ -393,6 +468,7 @@ export default function App() {
   const handleUpdateSettings = useCallback((patch: Partial<GameSettings>) => {
     setSaveState((prev) => {
       const next = updateSettings(prev, patch, userScopeRef.current);
+      saveStateRef.current = next;
       soundEngine.setMuted(next.settings.muted);
       engineRef.current?.setAutoTimeCycle(next.settings.autoTimeCycle);
       engineRef.current?.setCameraSensitivity(next.settings.cameraSensitivity);
@@ -412,12 +488,14 @@ export default function App() {
         photos: prev.photos.filter((p) => p.id !== photoId),
       };
       persistSaveState(next, userScopeRef.current);
+      saveStateRef.current = next;
       return next;
     });
   }, []);
 
   const handleResetSave = useCallback(() => {
     const fresh = clearSaveState(userScopeRef.current);
+    saveStateRef.current = fresh;
     setSaveState(fresh);
     setScoutTarget(null);
     soundEngine.setMuted(fresh.settings.muted);
@@ -532,6 +610,8 @@ export default function App() {
           showTouchControls={saveState.settings.showTouchControls}
           scoutTarget={scoutTarget}
           canScoutMore={discoveredCount < TROPICAL_SPECIES.length}
+          rewardedAdAvailable={rewardedAdAvailable}
+          scoutCooldownSec={scoutCooldownSec}
           onEnterPhotoMode={handleEnterPhotoMode}
           onOpenJournal={() => {
             setJournalInitialSpecies(null);
@@ -607,6 +687,8 @@ export default function App() {
           initialSpeciesId={journalInitialSpecies}
           user={cgUser}
           userAccountAvailable={userAccountAvailable}
+          rewardedAdAvailable={rewardedAdAvailable}
+          scoutCooldownSec={scoutCooldownSec}
           onClose={() => setJournalOpen(false)}
           onDeletePhoto={handleDeletePhoto}
           onSignIn={() => void handleSignIn()}

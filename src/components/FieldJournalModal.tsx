@@ -14,6 +14,8 @@ interface FieldJournalModalProps {
   initialSpeciesId?: string | null;
   user: CrazyGamesUserProfile | null;
   userAccountAvailable: boolean;
+  rewardedAdAvailable: boolean;
+  scoutCooldownSec: number;
   onClose: () => void;
   onDeletePhoto: (photoId: string) => void;
   onSignIn: () => void;
@@ -27,6 +29,8 @@ export const FieldJournalModal: React.FC<FieldJournalModalProps> = ({
   initialSpeciesId,
   user,
   userAccountAvailable,
+  rewardedAdAvailable,
+  scoutCooldownSec,
   onClose,
   onDeletePhoto,
   onSignIn,
@@ -386,11 +390,22 @@ export const FieldJournalModal: React.FC<FieldJournalModalProps> = ({
                 </p>
                 <button
                   type="button"
+                  disabled={!rewardedAdAvailable && scoutCooldownSec > 0}
                   onClick={() => onTrackSpecies(selectedSpecies.id)}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 min-h-[40px] rounded-lg bg-[#D9822B] hover:bg-[#E28F3A] text-[#1A1D16] font-semibold text-xs transition-colors cursor-pointer"
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 min-h-[40px] rounded-lg font-semibold text-xs transition-colors ${
+                    !rewardedAdAvailable && scoutCooldownSec > 0
+                      ? 'bg-[#D8CFC0] text-[#5E6A5F] cursor-not-allowed'
+                      : 'bg-[#D9822B] hover:bg-[#E28F3A] text-[#1A1D16] cursor-pointer'
+                  }`}
                 >
                   <Crosshair className="w-3.5 h-3.5" />
-                  <span>Pin Location on Minimap (Watch Ad)</span>
+                  <span className="tabular-nums">
+                    {rewardedAdAvailable
+                      ? 'Pin Location on Minimap (Watch Ad)'
+                      : scoutCooldownSec > 0
+                        ? `Scout Pulse Cooldown (${scoutCooldownSec}s)`
+                        : 'Pin Location on Minimap'}
+                  </span>
                 </button>
               </div>
             )}

@@ -107,8 +107,8 @@ export function loadSaveState(scope = crazyGames.getUserStorageScope()): SaveSta
       );
     }
 
-    // One-time migration from v1 guest storage if loading guest scope
-    if (scope === 'guest') {
+    // One-time migration from v1 localStorage only when playing standalone outside CrazyGames SDK Data
+    if (scope === 'guest' && !crazyGames.isUsingSdkData()) {
       const legacyRaw = crazyGames.dataGetItem(LEGACY_STORAGE_KEY);
       if (legacyRaw) {
         const migrated = normalizeState(JSON.parse(legacyRaw) as Partial<SaveState>, fallback);
@@ -121,6 +121,12 @@ export function loadSaveState(scope = crazyGames.getUserStorageScope()): SaveSta
   } catch {
     return fallback;
   }
+}
+
+export function clearGuestSessionData(): void {
+  const { metaKey, photosKey } = getScopeKeys('guest');
+  crazyGames.dataRemoveItem(metaKey);
+  crazyGames.dataRemoveItem(photosKey);
 }
 
 function prioritizePhotos(photos: CapturedPhoto[], maxCount: number): CapturedPhoto[] {

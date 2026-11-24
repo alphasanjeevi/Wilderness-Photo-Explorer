@@ -16,6 +16,9 @@ execSync(`npx vite build --base=./ --outDir dist-webgl-tmp`, {
   stdio: 'inherit',
 });
 
+// Defense-in-depth: never ship non-game workspace attachments inside CrazyGames ZIP
+fs.rmSync(path.join(tempOutDir, 'assets', 'aistudio'), { recursive: true, force: true });
+
 // 1. Standard CrazyGames HTML5 bundle folder (index.html at bundle root + ./assets/*)
 fs.rmSync(crazyGamesDir, { recursive: true, force: true });
 fs.mkdirSync(exportDir, { recursive: true });
