@@ -130,6 +130,7 @@ export class WorldEngine {
   private jeepSteer = 0;
   private wheelSpin = 0;
   private chaseYawOffset = 0;
+  private chaseDistance = 8.4;
 
   // Photo mode camera state
   private photoYaw = 0.25;
@@ -358,7 +359,7 @@ export class WorldEngine {
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerUp);
-    canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    window.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('webglcontextlost', this.onContextLost);
     canvas.addEventListener('webglcontextrestored', this.onContextRestored);
   }
@@ -440,9 +441,20 @@ export class WorldEngine {
   };
 
   private onWheel = (e: WheelEvent): void => {
-    if (this.phase !== 'photo') return;
+    if (this.phase !== 'photo' && this.phase !== 'playing') return;
     e.preventDefault();
-    this.setZoom(this.photoZoom - Math.sign(e.deltaY) * 0.35);
+
+    const deltaY =
+      e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 120 : e.deltaY;
+    if (deltaY === 0) return;
+
+    if (this.phase === 'photo') {
+      const zoomDelta = Math.abs(deltaY) < 40 ? -deltaY * 0.012 : -Math.sign(deltaY) * 0.35;
+      this.setZoom(this.photoZoom + zoomDelta);
+    } else {
+      const distDelta = Math.abs(deltaY) < 40 ? deltaY * 0.018 : Math.sign(deltaY) * 0.85;
+      this.chaseDistance = THREE.MathUtils.clamp(this.chaseDistance + distDelta, 5.2, 13.5);
+    }
   };
 
   public addCameraLookDelta(dx: number, dy: number): void {
@@ -498,6 +510,10 @@ export class WorldEngine {
 
   public setZoom(z: number): void {
     this.photoZoom = THREE.MathUtils.clamp(z, 1.0, 5.0);
+    if (this.phase === 'photo') {
+      this.lastHudPush = performance.now();
+      this.pushTelemetry(Math.abs(this.jeepSpeed) * 3.6);
+    }
   }
 
   public honk(): void {
@@ -961,7 +977,7 @@ export class WorldEngine {
 
   private updateChaseCamera(dt: number): void {
     const camYaw = this.jeepYaw + this.chaseYawOffset;
-    const backDist = 8.4;
+    const backDist = this.chaseDistance;
     const camX = this.jeepX - Math.sin(camYaw) * backDist;
     const camZ = this.jeepZ - Math.cos(camYaw) * backDist;
     const groundY = groundHeightAt(camX, camZ);
@@ -1265,10 +1281,10 @@ export class WorldEngine {
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('wheel', this.onWheel);
 
     const canvas = this.renderer.domElement;
     canvas.removeEventListener('pointerdown', this.onPointerDown);
-    canvas.removeEventListener('wheel', this.onWheel);
     canvas.removeEventListener('webglcontextlost', this.onContextLost);
     canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
 

@@ -59,7 +59,6 @@ class CrazyGamesClient {
   private gameplayActive = false;
   private adPlaying = false;
   private rewardedAdsDisabled = false;
-  private lastMidgameAtMs = 0;
   private currentUser: CrazyGamesUserProfile | null = null;
   private authListeners = new Set<(user: CrazyGamesUserProfile | null) => void>();
   private rawAuthListenerBound = false;
@@ -124,7 +123,6 @@ class CrazyGamesClient {
     this.gameplayActive = false;
     this.adPlaying = false;
     this.rewardedAdsDisabled = false;
-    this.lastMidgameAtMs = 0;
     this.currentUser = null;
     this.rawAuthListenerBound = false;
     this.authListeners.clear();
@@ -290,14 +288,6 @@ class CrazyGamesClient {
         completed: type === 'midgame',
         reason: type === 'midgame' ? 'skipped_offline' : 'unavailable',
       };
-    }
-
-    if (type === 'midgame') {
-      const now = Date.now();
-      if (now - this.lastMidgameAtMs < 45_000) {
-        return { completed: true, reason: 'localCooldown' };
-      }
-      this.lastMidgameAtMs = now;
     }
 
     return new Promise<AdRequestResult>((resolve) => {

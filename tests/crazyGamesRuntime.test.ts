@@ -258,6 +258,11 @@ test('Rewarded ad lifecycle pauses/resumes gameplay and flips Basic Launch fallb
   assert.equal(blkRes.reason, 'adblock');
   assert.equal(crazyGames.isRewardedAdAvailable(), true);
 
+  // Verify midgame ads pass directly to CrazyGames SDK without local cooldown throttling
+  await crazyGames.requestAd('midgame', {});
+  await crazyGames.requestAd('midgame', {});
+  assert.equal(h.events.filter((e) => e === 'requestAd:midgame').length, 2);
+
   // Simulate CrazyGames Basic Launch (adsDisabled): flips rewardedAdAvailable to false cleanly
   mode = 'adsDisabled';
   const basicRes = await crazyGames.requestAd('rewarded', {});

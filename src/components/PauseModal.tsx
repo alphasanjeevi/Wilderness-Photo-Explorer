@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { BookOpen, Home, LogIn, Play, RotateCcw, User, Volume2, VolumeX, X } from 'lucide-react';
+import {
+  BookOpen,
+  Crosshair,
+  Home,
+  LogIn,
+  Play,
+  RotateCcw,
+  User,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
 import { CrazyGamesUserProfile, GameSettings } from '../types/game';
 
 interface PauseModalProps {
@@ -8,6 +19,10 @@ interface PauseModalProps {
   totalSpecies: number;
   user: CrazyGamesUserProfile | null;
   userAccountAvailable: boolean;
+  canScoutMore: boolean;
+  scoutActive: boolean;
+  rewardedAdAvailable: boolean;
+  scoutCooldownSec: number;
   onResume: () => void;
   onOpenJournal: () => void;
   onUpdateSettings: (patch: Partial<GameSettings>) => void;
@@ -15,6 +30,7 @@ interface PauseModalProps {
   onReturnToTitle: () => void;
   onResetSave: () => void;
   onSignIn: () => void;
+  onRequestScoutBeacon: () => void;
 }
 
 export const PauseModal: React.FC<PauseModalProps> = ({
@@ -23,6 +39,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   totalSpecies,
   user,
   userAccountAvailable,
+  canScoutMore,
+  scoutActive,
+  rewardedAdAvailable,
+  scoutCooldownSec,
   onResume,
   onOpenJournal,
   onUpdateSettings,
@@ -30,8 +50,11 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   onReturnToTitle,
   onResetSave,
   onSignIn,
+  onRequestScoutBeacon,
 }) => {
   const [confirmReset, setConfirmReset] = useState(false);
+
+  const scoutDisabled = !canScoutMore || scoutActive || (!rewardedAdAvailable && scoutCooldownSec > 0);
 
   return (
     <div className="fixed inset-0 z-30 bg-[#121912]/75 flex items-center justify-center p-3 sm:p-4">
@@ -92,7 +115,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
           )}
         </div>
 
-        {/* Primary Resume & Journal Buttons */}
+        {/* Primary Resume, Journal & Scout Beacon Buttons */}
         <div className="mt-4 space-y-2.5">
           <button
             type="button"
@@ -111,6 +134,35 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             <BookOpen className="w-4 h-4 text-[#E5B869]" />
             <span>Open Field Journal</span>
           </button>
+
+          {canScoutMore && (
+            <button
+              type="button"
+              disabled={scoutDisabled}
+              onClick={onRequestScoutBeacon}
+              className={`w-full inline-flex items-center justify-center gap-2 min-h-[44px] py-2.5 px-4 rounded-xl border text-sm font-medium transition-colors ${
+                scoutDisabled
+                  ? 'bg-[#212D23] border-[#F4EFE6]/10 text-[#D8D2C5]/55 cursor-not-allowed'
+                  : 'bg-[#273629] hover:bg-[#314434] border-[#E5B869]/35 text-[#E5B869] cursor-pointer'
+              }`}
+              title={
+                rewardedAdAvailable
+                  ? 'Watch a short ad to reveal the nearest undiscovered species on your minimap'
+                  : 'Send a free field pulse to locate the nearest undiscovered species on your minimap'
+              }
+            >
+              <Crosshair className="w-4 h-4" />
+              <span className="tabular-nums">
+                {scoutActive
+                  ? 'Scout Beacon Active on Minimap'
+                  : rewardedAdAvailable
+                    ? 'Locate Nearest Species (Watch Ad)'
+                    : scoutCooldownSec > 0
+                      ? `Scout Pulse Cooling Down (${scoutCooldownSec}s)`
+                      : 'Locate Nearest Species (Scout Pulse)'}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Settings */}

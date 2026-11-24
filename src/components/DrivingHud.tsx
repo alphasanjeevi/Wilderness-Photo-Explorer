@@ -6,7 +6,6 @@ import {
   ChevronUp,
   CloudRain,
   Compass,
-  Crosshair,
   Pause,
   Sun,
   Sunset,
@@ -23,9 +22,6 @@ interface DrivingHudProps {
   muted: boolean;
   showTouchControls: boolean;
   scoutTarget?: ScoutTarget | null;
-  canScoutMore: boolean;
-  rewardedAdAvailable: boolean;
-  scoutCooldownSec: number;
   onEnterPhotoMode: () => void;
   onOpenJournal: () => void;
   onPause: () => void;
@@ -35,7 +31,6 @@ interface DrivingHudProps {
   onSetTimePreset: (t: number) => void;
   onVirtualInput: (throttle: number, steer: number) => void;
   onVirtualBrake: (active: boolean) => void;
-  onRequestScoutBeacon: () => void;
 }
 
 export const DrivingHud: React.FC<DrivingHudProps> = ({
@@ -45,9 +40,6 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
   muted,
   showTouchControls,
   scoutTarget,
-  canScoutMore,
-  rewardedAdAvailable,
-  scoutCooldownSec,
   onEnterPhotoMode,
   onOpenJournal,
   onPause,
@@ -57,7 +49,6 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
   onSetTimePreset,
   onVirtualInput,
   onVirtualBrake,
-  onRequestScoutBeacon,
 }) => {
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [mobileEnvOpen, setMobileEnvOpen] = useState(false);
@@ -151,33 +142,6 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
           </div>
 
           <Minimap telemetry={telemetry} scoutTarget={scoutTarget} />
-
-          {canScoutMore && !scoutTarget && (
-            <button
-              type="button"
-              disabled={!rewardedAdAvailable && scoutCooldownSec > 0}
-              onClick={onRequestScoutBeacon}
-              className={`pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] rounded-xl bg-[#182219]/90 border text-[11px] font-medium shadow-md transition-colors ${
-                !rewardedAdAvailable && scoutCooldownSec > 0
-                  ? 'border-[#F4EFE6]/15 text-[#D8D2C5]/60 cursor-not-allowed'
-                  : 'hover:bg-[#243226] border-[#E5B869]/30 text-[#E5B869] cursor-pointer'
-              }`}
-              title={
-                rewardedAdAvailable
-                  ? 'Watch a short ad to reveal the nearest undiscovered species on your minimap'
-                  : 'Send a free field pulse to locate the nearest undiscovered species on your minimap'
-              }
-            >
-              <Crosshair className="w-3.5 h-3.5" />
-              <span className="tabular-nums">
-                {rewardedAdAvailable
-                  ? 'Scout Beacon (Ad)'
-                  : scoutCooldownSec > 0
-                    ? `Scout Pulse · ${scoutCooldownSec}s`
-                    : 'Scout Pulse'}
-              </span>
-            </button>
-          )}
         </div>
 
         {/* Top-right action cluster */}

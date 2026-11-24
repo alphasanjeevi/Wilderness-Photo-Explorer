@@ -225,7 +225,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
               </div>
             ) : (
               <div className="px-3 py-1 rounded-lg bg-[#182219]/75 text-xs text-[#E4DDD0]/85">
-                Drag to aim · Pinch or slider to zoom
+                Drag to aim · Scroll, pinch, or slider to zoom
               </div>
             )}
           </div>

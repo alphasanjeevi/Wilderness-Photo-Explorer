@@ -91,6 +91,7 @@ export default function App() {
   const saveStateRef = useRef<SaveState>(saveState);
   const userScopeRef = useRef<string>(userScope);
   const sdkInitializedRef = useRef<boolean>(false);
+  const hasPlayedSessionRef = useRef<boolean>(false);
 
   phaseRef.current = phase;
   journalOpenRef.current = journalOpen;
@@ -278,11 +279,37 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [scoutTarget]);
 
+  const runMidgameAdThen = useCallback(async (action: () => void) => {
+    const result = await crazyGames.requestAd('midgame', {
+      onAdStart: () => {
+        setAdPlaying(true);
+        soundEngine.setAdPaused(true);
+      },
+      onAdEnd: () => {
+        setAdPlaying(false);
+        soundEngine.setAdPaused(false);
+      },
+    });
+    if (result.completed || result.reason) {
+      action();
+    }
+  }, []);
+
   const handleStartExpedition = useCallback(() => {
     soundEngine.unlockAndStart();
-    setJournalOpen(false);
-    setPhase('playing');
-  }, []);
+    const enterExpedition = () => {
+      hasPlayedSessionRef.current = true;
+      setJournalOpen(false);
+      setPhase('playing');
+    };
+
+    // Only request a midgame ad at a natural expedition restart/new-session transition (never on first launch or navigation buttons)
+    if (hasPlayedSessionRef.current) {
+      void runMidgameAdThen(enterExpedition);
+    } else {
+      enterExpedition();
+    }
+  }, [runMidgameAdThen]);
 
   const handleEnterPhotoMode = useCallback(() => {
     soundEngine.unlockAndStart();
@@ -303,22 +330,6 @@ export default function App() {
       showNotice('Account sign-in is available when played on CrazyGames.');
     }
   }, [applyUserScopeSave, showNotice]);
-
-  const runMidgameAdThen = useCallback(async (action: () => void) => {
-    const result = await crazyGames.requestAd('midgame', {
-      onAdStart: () => {
-        setAdPlaying(true);
-        soundEngine.setAdPaused(true);
-      },
-      onAdEnd: () => {
-        setAdPlaying(false);
-        soundEngine.setAdPaused(false);
-      },
-    });
-    if (result.completed || result.reason) {
-      action();
-    }
-  }, []);
 
   const handleRequestScoutBeacon = useCallback(
     async (preferredSpeciesId?: string) => {
@@ -609,9 +620,6 @@ export default function App() {
           muted={saveState.settings.muted}
           showTouchControls={saveState.settings.showTouchControls}
           scoutTarget={scoutTarget}
-          canScoutMore={discoveredCount < TROPICAL_SPECIES.length}
-          rewardedAdAvailable={rewardedAdAvailable}
-          scoutCooldownSec={scoutCooldownSec}
           onEnterPhotoMode={handleEnterPhotoMode}
           onOpenJournal={() => {
             setJournalInitialSpecies(null);
@@ -626,7 +634,6 @@ export default function App() {
             engineRef.current?.setVirtualInput(throttle, steer)
           }
           onVirtualBrake={(active) => engineRef.current?.setVirtualBrake(active)}
-          onRequestScoutBeacon={() => void handleRequestScoutBeacon()}
         />
       )}
 
@@ -658,25 +665,26 @@ export default function App() {
           totalSpecies={TROPICAL_SPECIES.length}
           user={cgUser}
           userAccountAvailable={userAccountAvailable}
+          canScoutMore={discoveredCount < TROPICAL_SPECIES.length}
+          scoutActive={Boolean(scoutTarget)}
+          rewardedAdAvailable={rewardedAdAvailable}
+          scoutCooldownSec={scoutCooldownSec}
           onResume={() => setPhase('playing')}
           onOpenJournal={() => {
             setJournalInitialSpecies(null);
             setJournalOpen(true);
           }}
           onUpdateSettings={handleUpdateSettings}
-          onReturnToCamp={() =>
-            void runMidgameAdThen(() => {
-              engineRef.current?.resetJeepToCamp();
-              setPhase('playing');
-            })
-          }
-          onReturnToTitle={() =>
-            void runMidgameAdThen(() => {
-              setPhase('title');
-            })
-          }
+          onReturnToCamp={() => {
+            engineRef.current?.resetJeepToCamp();
+            setPhase('playing');
+          }}
+          onReturnToTitle={() => {
+            setPhase('title');
+          }}
           onResetSave={handleResetSave}
           onSignIn={() => void handleSignIn()}
+          onRequestScoutBeacon={() => void handleRequestScoutBeacon()}
         />
       )}
 
