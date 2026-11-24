@@ -86,6 +86,12 @@ export interface FocusTargetInfo {
   qualityLabel: 'Well Framed' | 'Clear Focus' | 'Distant Subject';
 }
 
+export interface NearbyWildlifeBlip {
+  x: number;
+  z: number;
+  category: SpeciesCategory;
+}
+
 export interface WorldHudTelemetry {
   speedKmh: number;
   headingDeg: number;
@@ -99,4 +105,6 @@ export interface WorldHudTelemetry {
   nearestCue: string | null;
   jeepX: number;
   jeepZ: number;
+  jeepYaw: number;
+  nearbyWildlife: NearbyWildlifeBlip[];
 }

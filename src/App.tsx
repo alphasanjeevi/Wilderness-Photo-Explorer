@@ -37,6 +37,8 @@ const INITIAL_TELEMETRY: WorldHudTelemetry = {
   nearestCue: null,
   jeepX: 0,
   jeepZ: 5,
+  jeepYaw: 0.25,
+  nearbyWildlife: [],
 };
 
 interface CaptureBannerState {

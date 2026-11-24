@@ -20,14 +20,20 @@ import {
   JeepRig,
 } from './models';
 import {
+  BRIDGE_HALF_L,
+  BRIDGE_HALF_W,
+  BRIDGE_X,
+  BRIDGE_Z,
+  createTerrainMesh,
   distanceToRiver,
   getHabitatAt,
   groundHeightAt,
   HABITAT_ZONES,
   isOnBridge,
   PLAYABLE_RADIUS,
-  createTerrainMesh,
+  riverCenterZ,
 } from './terrain';
+import { ColliderWorld } from './physics';
 import {
   createContactShadowTexture,
   createGroundDetailTexture,
@@ -91,6 +97,7 @@ export class WorldEngine {
   private sunLight: THREE.DirectionalLight;
   private hemiLight: THREE.HemisphereLight;
   private jeep: JeepRig;
+  private colliders = new ColliderWorld();
   private actors: WildlifeActor[] = [];
   private waterfallParticles: THREE.Points;
   private fireflies: THREE.Points;
@@ -103,6 +110,7 @@ export class WorldEngine {
 
   private frameId = 0;
   private lastTimeMs = 0;
+  private lastBumpMs = 0;
   private elapsedSec = 0;
   private disposed = false;
 
@@ -189,10 +197,10 @@ export class WorldEngine {
     // 3. Scene & Camera
     this.scene = new THREE.Scene();
     this.scene.background = SKY_MORNING.clone();
-    this.scene.fog = new THREE.FogExp2(SKY_MORNING.getHex(), 0.0082);
+    this.scene.fog = new THREE.FogExp2(SKY_MORNING.getHex(), 0.0052);
 
     const aspect = (container.clientWidth || window.innerWidth) / (container.clientHeight || window.innerHeight);
-    this.camera = new THREE.PerspectiveCamera(58, aspect, 0.25, 280);
+    this.camera = new THREE.PerspectiveCamera(58, aspect, 0.25, 420);
 
     // 4. Studio Environment Map via RoomEnvironment (mandatory on every device)
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
@@ -232,11 +240,11 @@ export class WorldEngine {
     const terrain = createTerrainMesh(this.groundTex);
     this.scene.add(terrain);
 
-    const { waterfallParticles, fireflies } = createLandmarks(this.scene, this.woodTex);
+    const { waterfallParticles, fireflies } = createLandmarks(this.scene, this.woodTex, this.colliders);
     this.waterfallParticles = waterfallParticles;
     this.fireflies = fireflies;
 
-    createInstancedFlora(this.scene);
+    createInstancedFlora(this.scene, this.colliders);
 
     this.jeep = createJeepModel(this.shadowTex);
     this.jeepY = groundHeightAt(this.jeepX, this.jeepZ);
@@ -286,19 +294,25 @@ export class WorldEngine {
 
     TROPICAL_SPECIES.forEach((species, idx) => {
       const zone = zoneMap.get(species.habitat) ?? HABITAT_ZONES[0];
-      // Spawn 2 of common species, 1 of uncommon/rare, with deterministic scenic spreads
       const count = species.rarity === 'common' ? 2 : 1;
       for (let copy = 0; copy < count; copy++) {
         const angle = ((idx * 1.9 + copy * 2.7) % (Math.PI * 2));
-        const radius = 8 + ((idx * 7 + copy * 13) % 16);
+        const radius = 16 + ((idx * 11 + copy * 19) % 34);
         let sx = zone.x + Math.cos(angle) * radius;
         let sz = zone.z + Math.sin(angle) * radius;
 
-        // River species stay along the riverbank
+        // River species spread along the wide riverbank & waterfall stretches
         if (species.habitat === 'river') {
-          sx = -18 + idx * 5.2 + copy * 14;
-          const rz = 47 + Math.sin(sx * 0.045) * 11 + Math.cos(sx * 0.022) * 5;
-          sz = rz + (copy % 2 === 0 ? -7.2 : 7.4);
+          sx = -95 + ((idx * 17 + copy * 37) % 190);
+          if (Math.abs(sx - BRIDGE_X) < 12) sx += 18;
+          const rz = riverCenterZ(sx);
+          sz = rz + (copy % 2 === 0 ? -9.5 : 9.8);
+        }
+
+        if (species.flightHeight === 0) {
+          const safe = this.colliders.resolveAnimal(sx, sz, 0.75);
+          sx = safe.x;
+          sz = safe.z;
         }
 
         const rig = buildSpeciesMesh(species, this.shadowTex);
@@ -316,13 +330,13 @@ export class WorldEngine {
           y: sy,
           z: sz,
           yaw: angle,
-          targetX: sx + Math.cos(angle + 1) * 5,
-          targetZ: sz + Math.sin(angle + 1) * 5,
+          targetX: sx + Math.cos(angle + 1) * 9,
+          targetZ: sz + Math.sin(angle + 1) * 9,
           state: 'idle',
           stateTimer: 1.5 + (idx % 4),
           animPhase: idx * 0.8 + copy * 1.9,
           hopHeight: 0,
-          baseRadius: 10,
+          baseRadius: 22,
         });
       }
     });
@@ -658,7 +672,7 @@ export class WorldEngine {
       this.scene.fog.color.copy(_colorFog);
       this.scene.fog.density = THREE.MathUtils.damp(
         this.scene.fog.density,
-        isRain ? 0.0145 : t > 0.65 ? 0.0095 : 0.0076,
+        isRain ? 0.0095 : t > 0.65 ? 0.0062 : 0.0048,
         2.5,
         dt
       );
@@ -764,8 +778,36 @@ export class WorldEngine {
       this.jeepYaw += this.jeepSteer * 2.55 * speedFactor * dirSign * dt;
     }
 
-    const nextX = this.jeepX + Math.sin(this.jeepYaw) * this.jeepSpeed * dt;
-    const nextZ = this.jeepZ + Math.cos(this.jeepYaw) * this.jeepSpeed * dt;
+    const sinY = Math.sin(this.jeepYaw);
+    const cosY = Math.cos(this.jeepYaw);
+    const vx = sinY * this.jeepSpeed;
+    const vz = cosY * this.jeepSpeed;
+
+    let nextX = this.jeepX + vx * dt;
+    let nextZ = this.jeepZ + vz * dt;
+
+    // Resolve solid collisions against trees, rocks, bridge railings, camp, ruins, and cliffs
+    const colRes = this.colliders.resolveJeep(nextX, nextZ, this.jeepYaw, vx, vz);
+    nextX = colRes.x;
+    nextZ = colRes.z;
+
+    if (colRes.collided) {
+      this.jeepSpeed = sinY * colRes.vx + cosY * colRes.vz;
+      const nowMs = performance.now();
+      if (colRes.impactStrength > 1.3 && nowMs - this.lastBumpMs > 250) {
+        this.lastBumpMs = nowMs;
+        soundEngine.playBump(colRes.impactStrength);
+      }
+    }
+
+    // Prevent driving sideways underneath the raised bridge deck from river water
+    if (
+      Math.abs(nextX - BRIDGE_X) <= BRIDGE_HALF_W + 0.95 &&
+      Math.abs(nextX - BRIDGE_X) > BRIDGE_HALF_W - 0.1 &&
+      Math.abs(nextZ - BRIDGE_Z) <= BRIDGE_HALF_L + 1.2
+    ) {
+      nextX = BRIDGE_X + Math.sign(nextX - BRIDGE_X) * (BRIDGE_HALF_W + 0.95);
+    }
 
     // Natural perimeter boundary keep-in (gentle mountain rim)
     const dist = Math.hypot(nextX, nextZ);
@@ -956,6 +998,11 @@ export class WorldEngine {
           a.yaw += diff * Math.min(1, dt * 4.5);
           a.x += (dx / d) * moveSpeed * dt;
           a.z += (dz / d) * moveSpeed * dt;
+          if (a.species.flightHeight === 0) {
+            const resolved = this.colliders.resolveAnimal(a.x, a.z, 0.55);
+            a.x = resolved.x;
+            a.z = resolved.z;
+          }
         } else if (a.state === 'wander') {
           a.state = 'idle';
           a.stateTimer = 2.0;
@@ -1090,15 +1137,23 @@ export class WorldEngine {
 
   private pushTelemetry(speedKmh: number): void {
     const hab = getHabitatAt(this.jeepX, this.jeepZ);
-    const deg = (((THREE.MathUtils.radToDeg(this.jeepYaw) % 360) + 360) % 360);
+    const deg = (((-THREE.MathUtils.radToDeg(this.jeepYaw) % 360) + 360) % 360);
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     const compassLabel = dirs[Math.round(deg / 45) % 8];
 
-    // Find closest wildlife hint within 26m so player gets gentle exploration cues
+    // Find closest wildlife hint + nearby minimap blips within 75m
     let nearestCue: string | null = null;
-    let nearestD = 26;
+    let nearestD = 28;
+    const nearbyWildlife: WorldHudTelemetry['nearbyWildlife'] = [];
     for (const a of this.actors) {
       const d = Math.hypot(a.x - this.jeepX, a.z - this.jeepZ);
+      if (d < 75) {
+        nearbyWildlife.push({
+          x: a.x,
+          z: a.z,
+          category: a.species.category,
+        });
+      }
       if (d < nearestD) {
         nearestD = d;
         nearestCue = `${a.species.category === 'bird' ? 'Birdsong' : a.species.category === 'insect' ? 'Rustling' : 'Tracks'} nearby`;
@@ -1118,6 +1173,8 @@ export class WorldEngine {
       nearestCue,
       jeepX: this.jeepX,
       jeepZ: this.jeepZ,
+      jeepYaw: this.jeepYaw,
+      nearbyWildlife,
     });
   }
 

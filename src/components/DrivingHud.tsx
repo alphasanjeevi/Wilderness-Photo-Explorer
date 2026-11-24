@@ -13,6 +13,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { WeatherType, WorldHudTelemetry } from '../types/game';
+import { Minimap } from './Minimap';
 
 interface DrivingHudProps {
   telemetry: WorldHudTelemetry;
@@ -67,28 +68,32 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
 
   return (
     <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 sm:p-5">
-      {/* TOP BAR: Compact perimeter telemetry + quick actions (Zero backdrop-blur over WebGL) */}
+      {/* TOP BAR: Compact perimeter telemetry + rotatable minimap + quick actions */}
       <div className="flex items-start justify-between gap-3">
-        {/* Top-left reserve status */}
-        <div className="bg-[#182219]/90 border border-[#F4EFE6]/12 rounded-xl px-4 py-2.5 shadow-md">
-          <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[#F4EFE6]">
-            <span>{telemetry.habitatLabel}</span>
-            <span className="text-[#F4EFE6]/40" aria-hidden="true">·</span>
-            <span className="text-[#E5B869] tabular-nums">
-              {discoveredCount}/{totalSpecies} Species
-            </span>
+        {/* Top-left reserve status & rotatable minimap */}
+        <div className="flex flex-col items-start gap-2.5">
+          <div className="bg-[#182219]/90 border border-[#F4EFE6]/12 rounded-xl px-4 py-2.5 shadow-md">
+            <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[#F4EFE6]">
+              <span>{telemetry.habitatLabel}</span>
+              <span className="text-[#F4EFE6]/40" aria-hidden="true">·</span>
+              <span className="text-[#E5B869] tabular-nums">
+                {discoveredCount}/{totalSpecies} Species
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-[#D8D2C5]/80">
+              <span>{telemetry.timeLabel}</span>
+              <span aria-hidden="true">·</span>
+              <span>{telemetry.weather === 'rainy' ? 'Rain Showers' : 'Clear Sky'}</span>
+              {telemetry.nearestCue && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-[#9FD896]">{telemetry.nearestCue}</span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-[#D8D2C5]/80">
-            <span>{telemetry.timeLabel}</span>
-            <span aria-hidden="true">·</span>
-            <span>{telemetry.weather === 'rainy' ? 'Rain Showers' : 'Clear Sky'}</span>
-            {telemetry.nearestCue && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="text-[#9FD896]">{telemetry.nearestCue}</span>
-              </>
-            )}
-          </div>
+
+          <Minimap telemetry={telemetry} />
         </div>
 
         {/* Top-right action cluster */}

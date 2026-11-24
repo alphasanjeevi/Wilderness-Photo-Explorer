@@ -1,11 +1,23 @@
 import * as THREE from 'three';
 import { SpeciesDefinition } from '../types/game';
+import { ColliderWorld } from './physics';
 import {
+  BRIDGE_HALF_L,
+  BRIDGE_HALF_W,
+  BRIDGE_RAMP_L,
+  BRIDGE_X,
+  BRIDGE_Z,
+  CAMP_X,
+  CAMP_Z,
   distanceToRiver,
   distanceToRoad,
   groundHeightAt,
   PLAYABLE_RADIUS,
   riverCenterZ,
+  RUINS_X,
+  RUINS_Z,
+  WATERFALL_X,
+  WATERFALL_Z,
 } from './terrain';
 
 export interface JeepRig {
@@ -261,7 +273,8 @@ export function createJeepModel(shadowTex: THREE.CanvasTexture): JeepRig {
 
 export function createLandmarks(
   scene: THREE.Scene,
-  woodTex: THREE.CanvasTexture
+  woodTex: THREE.CanvasTexture,
+  colliders: ColliderWorld
 ): { waterfallParticles: THREE.Points; fireflies: THREE.Points } {
   const landmarkGroup = new THREE.Group();
   scene.add(landmarkGroup);
@@ -290,11 +303,9 @@ export function createLandmarks(
     flatShading: true,
   });
 
-  // === 1. RESEARCH CAMP BASE (-10, 0, -8) ===
+  // === 1. RESEARCH CAMP BASE ===
   const campGroup = new THREE.Group();
-  const campX = -11;
-  const campZ = -9;
-  campGroup.position.set(campX, groundHeightAt(campX, campZ), campZ);
+  campGroup.position.set(CAMP_X, groundHeightAt(CAMP_X, CAMP_Z), CAMP_Z);
   campGroup.rotation.y = 0.4;
 
   const deck = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.35, 5.6), woodMat);
@@ -302,6 +313,9 @@ export function createLandmarks(
   deck.receiveShadow = true;
   deck.castShadow = true;
   campGroup.add(deck);
+
+  // Solid collider for the raised camp deck, tent, crates, and lantern post
+  colliders.addBox(CAMP_X, CAMP_Z, 3.85, 3.05, 0.4, 'camp_deck');
 
   // Expedition A-Frame Tent (multi-part)
   const tentBody = new THREE.Mesh(new THREE.ConeGeometry(2.6, 2.7, 4), canvasMat);
@@ -352,7 +366,7 @@ export function createLandmarks(
 
   // Trailhead Signpost near road
   const signPost = new THREE.Group();
-  const sx = 6.5;
+  const sx = 7.5;
   const sz = 2.0;
   signPost.position.set(sx, groundHeightAt(sx, sz), sz);
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.3, 6), woodMat);
@@ -366,46 +380,76 @@ export function createLandmarks(
   signBoard2.rotation.y = -0.35;
   signPost.add(post, signBoard1, signBoard2);
   landmarkGroup.add(campGroup, signPost);
+  colliders.addCircle(sx, sz, 0.45, 'signpost');
 
-  // === 2. WOODEN BRIDGE OVER RIVER (x = 12, z = riverCenterZ(12)) ===
-  const bx = 12;
-  const bz = riverCenterZ(bx);
+  // === 2. WOODEN BRIDGE OVER RIVER (with smooth approach ramps & solid side railings) ===
   const bridgeGroup = new THREE.Group();
-  bridgeGroup.position.set(bx, 0, bz);
+  bridgeGroup.position.set(BRIDGE_X, 0, BRIDGE_Z);
 
-  const deckArch = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.36, 18.8), woodMat);
-  deckArch.position.y = 0.85;
-  deckArch.receiveShadow = true;
-  deckArch.castShadow = true;
-  bridgeGroup.add(deckArch);
+  const deckWidth = BRIDGE_HALF_W * 2;
+  const deckLength = BRIDGE_HALF_L * 2;
+  const deckMesh = new THREE.Mesh(new THREE.BoxGeometry(deckWidth, 0.42, deckLength), woodMat);
+  deckMesh.position.y = 0.92;
+  deckMesh.receiveShadow = true;
+  deckMesh.castShadow = true;
+  bridgeGroup.add(deckMesh);
 
-  // Side guard beams & pilings
-  for (const sideX of [-4.05, 4.05]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 18.8), woodMat);
-    rail.position.set(sideX, 1.65, 0);
+  // Approach wooden ramps on North and South ends so driving onto the bridge is smooth
+  const rampRise = 0.82;
+  const rampAngle = Math.atan2(rampRise, BRIDGE_RAMP_L);
+  const rampHyp = Math.hypot(BRIDGE_RAMP_L, rampRise);
+  for (const dir of [-1, 1]) {
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(deckWidth, 0.34, rampHyp), woodMat);
+    ramp.position.set(0, 0.56, dir * (BRIDGE_HALF_L + BRIDGE_RAMP_L * 0.48));
+    ramp.rotation.x = dir * rampAngle;
+    ramp.receiveShadow = true;
+    ramp.castShadow = true;
+    bridgeGroup.add(ramp);
+  }
+
+  // Side guard rails, posts & pilings + solid rail colliders
+  const railSpan = deckLength + 2.0;
+  for (const sideSign of [-1, 1]) {
+    const sideX = sideSign * (BRIDGE_HALF_W - 0.28);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, railSpan), woodMat);
+    rail.position.set(sideX, 1.88, 0);
     rail.castShadow = true;
-    bridgeGroup.add(rail);
+    const midRail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, railSpan), woodMat);
+    midRail.position.set(sideX, 1.44, 0);
+    bridgeGroup.add(rail, midRail);
 
-    for (let pz = -8; pz <= 8; pz += 4) {
-      const piling = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 3.6, 7), woodMat);
-      piling.position.set(sideX, 0.1, pz);
+    for (let pz = -BRIDGE_HALF_L; pz <= BRIDGE_HALF_L; pz += 4.2) {
+      const piling = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 3.9, 7), woodMat);
+      piling.position.set(sideX, 0.2, pz);
       piling.castShadow = true;
       bridgeGroup.add(piling);
     }
+
+    // Solid side railing + side abutment collider prevents sideways clipping through the bridge
+    colliders.addBox(
+      BRIDGE_X + sideX,
+      BRIDGE_Z,
+      0.55,
+      BRIDGE_HALF_L + BRIDGE_RAMP_L * 0.45,
+      0,
+      'bridge_railing'
+    );
   }
   landmarkGroup.add(bridgeGroup);
 
-  // === 3. MOSSY STONE RUINS (-50, 22) ===
+  // === 3. MOSSY STONE RUINS ===
   const ruinsGroup = new THREE.Group();
-  const rx = -50;
-  const rz = 22;
-  ruinsGroup.position.set(rx, groundHeightAt(rx, rz), rz);
+  ruinsGroup.position.set(RUINS_X, groundHeightAt(RUINS_X, RUINS_Z), RUINS_Z);
   ruinsGroup.rotation.y = 0.55;
 
-  const plinth = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.6, 8.5), stoneMat);
-  plinth.position.y = 0.28;
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(11.0, 0.65, 9.0), stoneMat);
+  plinth.position.y = 0.3;
   plinth.receiveShadow = true;
+  plinth.castShadow = true;
   ruinsGroup.add(plinth);
+
+  // Solid collider for the stone plinth & columns
+  colliders.addBox(RUINS_X, RUINS_Z, 5.6, 4.6, 0.55, 'stone_ruins');
 
   const colPositions: [number, number, number][] = [
     [-3.6, 2.2, -2.8],
@@ -425,7 +469,6 @@ export function createLandmarks(
     mossCap.position.set(cx, ch * 2 + 0.35, cz);
     ruinsGroup.add(mossCap);
   }
-  // Stone arch lintel on back pair
   const lintel = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.72, 1.15), stoneMat);
   lintel.position.set(0, 4.95, -2.8);
   lintel.castShadow = true;
@@ -439,11 +482,9 @@ export function createLandmarks(
   ruinsGroup.add(fallenCol);
   landmarkGroup.add(ruinsGroup);
 
-  // === 4. WATERFALL CLIFF & SPLASH POOL (-72, riverCenterZ(-72)) ===
-  const wfX = -72;
-  const wfZ = riverCenterZ(wfX);
+  // === 4. WATERFALL CLIFF & SPLASH POOL ===
   const wfGroup = new THREE.Group();
-  wfGroup.position.set(wfX, 0, wfZ);
+  wfGroup.position.set(WATERFALL_X, 0, WATERFALL_Z);
 
   const cliffMat = new THREE.MeshStandardMaterial({
     color: 0x5c6358,
@@ -451,12 +492,16 @@ export function createLandmarks(
     flatShading: true,
   });
   for (let i = 0; i < 6; i++) {
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(3.2 + (i % 3) * 1.4, 0), cliffMat);
-    rock.position.set(-4 + (i % 2) * 2.5, 2.4 + i * 1.1, (i - 2.5) * 3.2);
+    const rad = 3.6 + (i % 3) * 1.5;
+    const rx = -4.5 + (i % 2) * 2.6;
+    const rz = (i - 2.5) * 3.6;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rad, 0), cliffMat);
+    rock.position.set(rx, 2.6 + i * 1.2, rz);
     rock.scale.set(1.2, 1.4, 1.1);
     rock.castShadow = true;
     rock.receiveShadow = true;
     wfGroup.add(rock);
+    colliders.addCircle(WATERFALL_X + rx, WATERFALL_Z + rz, rad * 0.95, 'waterfall_cliff');
   }
 
   const cascadeMat = new THREE.MeshStandardMaterial({
@@ -467,18 +512,14 @@ export function createLandmarks(
     transparent: true,
     opacity: 0.78,
   });
-  const cascade = new THREE.Mesh(new THREE.BoxGeometry(1.6, 8.2, 4.6), cascadeMat);
-  cascade.position.set(-1.4, 3.4, 0);
+  const cascade = new THREE.Mesh(new THREE.BoxGeometry(1.8, 9.2, 5.2), cascadeMat);
+  cascade.position.set(-1.4, 3.8, 0);
   cascade.rotation.z = -0.18;
   wfGroup.add(cascade);
   landmarkGroup.add(wfGroup);
 
   // === 5. CONTINUOUS RIVER WATER RIBBON ===
-  const riverPts: THREE.Vector3[] = [];
-  for (let rxPos = -140; rxPos <= 140; rxPos += 6) {
-    riverPts.push(new THREE.Vector3(rxPos, -0.35, riverCenterZ(rxPos)));
-  }
-  const riverGeo = new THREE.PlaneGeometry(290, 14.5, 72, 4);
+  const riverGeo = new THREE.PlaneGeometry(480, 16.5, 110, 4);
   riverGeo.rotateX(-Math.PI / 2);
   const rPos = riverGeo.attributes.position;
   for (let i = 0; i < rPos.count; i++) {
@@ -500,18 +541,18 @@ export function createLandmarks(
   landmarkGroup.add(riverMesh);
 
   // Waterfall mist particles
-  const mistCount = 60;
+  const mistCount = 70;
   const mistPos = new Float32Array(mistCount * 3);
   for (let i = 0; i < mistCount; i++) {
-    mistPos[i * 3] = wfX + (Math.random() - 0.5) * 4.5;
-    mistPos[i * 3 + 1] = Math.random() * 5.5;
-    mistPos[i * 3 + 2] = wfZ + (Math.random() - 0.5) * 5.5;
+    mistPos[i * 3] = WATERFALL_X + (Math.random() - 0.5) * 5.5;
+    mistPos[i * 3 + 1] = Math.random() * 6.5;
+    mistPos[i * 3 + 2] = WATERFALL_Z + (Math.random() - 0.5) * 6.5;
   }
   const mistGeo = new THREE.BufferGeometry();
   mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPos, 3));
   const mistMat = new THREE.PointsMaterial({
     color: 0xe6f8fa,
-    size: 0.65,
+    size: 0.7,
     transparent: true,
     opacity: 0.55,
     depthWrite: false,
@@ -519,23 +560,23 @@ export function createLandmarks(
   const waterfallParticles = new THREE.Points(mistGeo, mistMat);
   scene.add(waterfallParticles);
 
-  // Dusk Fireflies across meadow & ruins
-  const fireflyCount = 70;
+  // Dusk Fireflies across the expanded valley
+  const fireflyCount = 110;
   const ffPos = new Float32Array(fireflyCount * 3);
   for (let i = 0; i < fireflyCount; i++) {
     const ang = Math.random() * Math.PI * 2;
-    const rad = 12 + Math.random() * 75;
+    const rad = 16 + Math.random() * 145;
     const fx = Math.cos(ang) * rad;
     const fz = Math.sin(ang) * rad;
     ffPos[i * 3] = fx;
-    ffPos[i * 3 + 1] = groundHeightAt(fx, fz) + 1.0 + Math.random() * 2.8;
+    ffPos[i * 3 + 1] = groundHeightAt(fx, fz) + 1.0 + Math.random() * 3.0;
     ffPos[i * 3 + 2] = fz;
   }
   const ffGeo = new THREE.BufferGeometry();
   ffGeo.setAttribute('position', new THREE.BufferAttribute(ffPos, 3));
   const ffMat = new THREE.PointsMaterial({
     color: 0xffe47a,
-    size: 0.42,
+    size: 0.45,
     transparent: true,
     opacity: 0,
     depthWrite: false,
@@ -546,14 +587,14 @@ export function createLandmarks(
   return { waterfallParticles, fireflies };
 }
 
-export function createInstancedFlora(scene: THREE.Scene): void {
+export function createInstancedFlora(scene: THREE.Scene, colliders: ColliderWorld): void {
   const trunkMat = new THREE.MeshStandardMaterial({
     color: 0x694a33,
     roughness: 0.9,
     flatShading: true,
   });
   const foliageMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, // tinted via instanceColor
+    color: 0xffffff,
     roughness: 0.84,
     flatShading: true,
   });
@@ -563,33 +604,33 @@ export function createInstancedFlora(scene: THREE.Scene): void {
     flatShading: true,
   });
 
-  // Deterministic PRNG so world layout stays lush and reproducible
+  // Deterministic PRNG so world layout & colliders are reproducible
   let seed = 4219;
   const rand = () => {
     seed = (seed * 16807) % 2147483647;
     return (seed - 1) / 2147483646;
   };
 
-  // Collect valid tree positions outside road, river, camp, and ruins
   const canopyTrees: { x: number; y: number; z: number; s: number; rot: number }[] = [];
   const palmTrees: { x: number; y: number; z: number; s: number; rot: number }[] = [];
 
-  for (let i = 0; i < 650 && canopyTrees.length < 185; i++) {
+  for (let i = 0; i < 1400 && canopyTrees.length < 340; i++) {
     const angle = rand() * Math.PI * 2;
-    const r = 16 + Math.pow(rand(), 0.72) * (PLAYABLE_RADIUS + 26);
+    const r = 18 + Math.pow(rand(), 0.72) * (PLAYABLE_RADIUS + 28);
     const x = Math.cos(angle) * r;
     const z = Math.sin(angle) * r;
 
-    if (distanceToRoad(x, z) < 7.2) continue;
-    if (distanceToRiver(x, z) < 9.0) continue;
-    if (Math.hypot(x + 11, z + 9) < 11) continue; // Camp clearing
-    if (Math.hypot(x + 50, z - 22) < 11) continue; // Ruins
-    if (Math.hypot(x - 48, z + 32) < 15 && rand() < 0.75) continue; // Open meadow
+    if (distanceToRoad(x, z) < 7.8) continue;
+    if (distanceToRiver(x, z) < 10.2) continue;
+    if (Math.hypot(x - CAMP_X, z - CAMP_Z) < 14) continue;
+    if (Math.hypot(x - RUINS_X, z - RUINS_Z) < 14) continue;
+    if (Math.hypot(x - BRIDGE_X, z - BRIDGE_Z) < 16) continue;
+    if (Math.hypot(x - 96, z + 64) < 24 && rand() < 0.78) continue; // Sunlit Meadow clearing
 
     const y = groundHeightAt(x, z);
-    const s = 0.85 + rand() * 0.35; // +-15% scale variation
+    const s = 0.86 + rand() * 0.34;
     const rot = rand() * Math.PI * 2;
-    if (rand() < 0.32 && distanceToRiver(x, z) < 36) {
+    if (rand() < 0.34 && distanceToRiver(x, z) < 48) {
       palmTrees.push({ x, y, z, s, rot });
     } else {
       canopyTrees.push({ x, y, z, s, rot });
@@ -597,12 +638,12 @@ export function createInstancedFlora(scene: THREE.Scene): void {
   }
 
   // === CANOPY TREES (Composite: trunk + lower crown + upper crown) ===
-  const trunkGeo = new THREE.CylinderGeometry(0.28, 0.5, 4.2, 6);
-  trunkGeo.translate(0, 2.1, 0);
-  const crownLowGeo = new THREE.DodecahedronGeometry(2.3, 0);
+  const trunkGeo = new THREE.CylinderGeometry(0.28, 0.52, 4.5, 6);
+  trunkGeo.translate(0, 2.0, 0); // Extends 0.25 below origin so slopes never show gaps
+  const crownLowGeo = new THREE.DodecahedronGeometry(2.35, 0);
   crownLowGeo.scale(1.1, 0.78, 1.1);
   crownLowGeo.translate(0, 4.6, 0);
-  const crownTopGeo = new THREE.DodecahedronGeometry(1.65, 0);
+  const crownTopGeo = new THREE.DodecahedronGeometry(1.68, 0);
   crownTopGeo.scale(1.0, 0.85, 1.0);
   crownTopGeo.translate(0.35, 6.1, -0.2);
 
@@ -621,7 +662,7 @@ export function createInstancedFlora(scene: THREE.Scene): void {
 
   for (let i = 0; i < countC; i++) {
     const t = canopyTrees[i];
-    dummy.position.set(t.x, t.y - 0.1, t.z);
+    dummy.position.set(t.x, t.y - 0.32, t.z);
     dummy.rotation.set(0, t.rot, 0);
     dummy.scale.setScalar(t.s);
     dummy.updateMatrix();
@@ -634,6 +675,10 @@ export function createInstancedFlora(scene: THREE.Scene): void {
     instCrownLow.setColorAt(i, cColor);
     cColor.offsetHSL(0.01, 0, 0.05);
     instCrownTop.setColorAt(i, cColor);
+
+    if (Math.hypot(t.x, t.z) < PLAYABLE_RADIUS + 4) {
+      colliders.addCircle(t.x, t.z, 0.62 * t.s, 'canopy_tree');
+    }
   }
   instTrunks.computeBoundingSphere();
   instCrownLow.computeBoundingSphere();
@@ -643,9 +688,9 @@ export function createInstancedFlora(scene: THREE.Scene): void {
   // === PALM TREES (Composite: curved trunk + 5 fronds) ===
   if (palmTrees.length > 0) {
     const pCount = palmTrees.length;
-    const pTrunkGeo = new THREE.CylinderGeometry(0.18, 0.34, 5.2, 6);
-    pTrunkGeo.translate(0, 2.6, 0);
-    pTrunkGeo.rotateZ(0.09);
+    const pTrunkGeo = new THREE.CylinderGeometry(0.18, 0.36, 5.4, 6);
+    pTrunkGeo.translate(0, 2.5, 0);
+    pTrunkGeo.rotateZ(0.08);
 
     const frondGeo = new THREE.ConeGeometry(0.85, 3.0, 4);
     frondGeo.scale(0.65, 1, 0.22);
@@ -659,7 +704,7 @@ export function createInstancedFlora(scene: THREE.Scene): void {
 
     for (let i = 0; i < pCount; i++) {
       const p = palmTrees[i];
-      dummy.position.set(p.x, p.y - 0.1, p.z);
+      dummy.position.set(p.x, p.y - 0.32, p.z);
       dummy.rotation.set(0, p.rot, 0);
       dummy.scale.setScalar(p.s);
       dummy.updateMatrix();
@@ -673,56 +718,69 @@ export function createInstancedFlora(scene: THREE.Scene): void {
         cColor.offsetHSL(0, 0, (rand() - 0.5) * 0.07);
         pFronds.setColorAt(i * 5 + f, cColor);
       }
+
+      if (Math.hypot(p.x, p.z) < PLAYABLE_RADIUS + 4) {
+        colliders.addCircle(p.x, p.z, 0.52 * p.s, 'palm_tree');
+      }
     }
     pTrunks.computeBoundingSphere();
     pFronds.computeBoundingSphere();
     scene.add(pTrunks, pFronds);
   }
 
-  // === ROCKS & BOULDERS ===
+  // === ROCKS & BOULDERS (Solid colliders) ===
   const rockGeo = new THREE.DodecahedronGeometry(1.0, 0);
-  const rockCount = 90;
+  const rockCount = 150;
   const instRocks = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
   instRocks.castShadow = true;
   instRocks.receiveShadow = true;
   let placedRocks = 0;
-  for (let i = 0; i < 400 && placedRocks < rockCount; i++) {
-    const x = (rand() - 0.5) * 200;
-    const z = (rand() - 0.5) * 200;
-    if (distanceToRoad(x, z) < 5.6) continue;
+  for (let i = 0; i < 800 && placedRocks < rockCount; i++) {
+    const x = (rand() - 0.5) * 360;
+    const z = (rand() - 0.5) * 360;
+    if (distanceToRoad(x, z) < 6.4) continue;
+    if (Math.hypot(x - CAMP_X, z - CAMP_Z) < 10) continue;
+    if (Math.hypot(x - BRIDGE_X, z - BRIDGE_Z) < 15) continue;
     const y = groundHeightAt(x, z);
-    dummy.position.set(x, y + 0.15, z);
+    const sx = 0.65 + rand() * 1.15;
+    const sy = 0.5 + rand() * 0.7;
+    const sz = 0.65 + rand() * 1.05;
+    dummy.position.set(x, y + 0.12, z);
     dummy.rotation.set(rand() * 2, rand() * 3, rand() * 2);
-    dummy.scale.set(0.6 + rand() * 1.1, 0.45 + rand() * 0.65, 0.6 + rand() * 1.0);
+    dummy.scale.set(sx, sy, sz);
     dummy.updateMatrix();
     instRocks.setMatrixAt(placedRocks, dummy.matrix);
     cColor.setHex(0x7c8276).offsetHSL(0, 0, (rand() - 0.5) * 0.1);
     instRocks.setColorAt(placedRocks, cColor);
+
+    if (Math.hypot(x, z) < PLAYABLE_RADIUS + 2) {
+      colliders.addCircle(x, z, Math.max(sx, sz) * 0.85, 'boulder');
+    }
     placedRocks++;
   }
   instRocks.count = placedRocks;
   instRocks.computeBoundingSphere();
   scene.add(instRocks);
 
-  // === FERNS & WILDFLOWERS ===
+  // === FERNS & WILDFLOWERS (Passable ground cover) ===
   const fernGeo = new THREE.ConeGeometry(0.65, 0.9, 5);
   fernGeo.scale(1.1, 0.7, 1.1);
   fernGeo.translate(0, 0.35, 0);
-  const fernCount = 220;
+  const fernCount = 360;
   const instFerns = new THREE.InstancedMesh(fernGeo, foliageMat, fernCount);
   let placedFerns = 0;
-  for (let i = 0; i < 600 && placedFerns < fernCount; i++) {
-    const x = (rand() - 0.5) * 195;
-    const z = (rand() - 0.5) * 195;
-    if (distanceToRoad(x, z) < 4.3) continue;
-    if (distanceToRiver(x, z) < 5.2) continue;
+  for (let i = 0; i < 1100 && placedFerns < fernCount; i++) {
+    const x = (rand() - 0.5) * 350;
+    const z = (rand() - 0.5) * 350;
+    if (distanceToRoad(x, z) < 4.8) continue;
+    if (distanceToRiver(x, z) < 6.4) continue;
     const y = groundHeightAt(x, z);
-    dummy.position.set(x, y - 0.05, z);
+    dummy.position.set(x, y - 0.08, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
     dummy.scale.setScalar(0.75 + rand() * 0.75);
     dummy.updateMatrix();
     instFerns.setMatrixAt(placedFerns, dummy.matrix);
-    cColor.setHex(rand() > 0.2 ? 0x518f40 : 0xd9a13b); // occasional sunlit wildflower tuft
+    cColor.setHex(rand() > 0.2 ? 0x518f40 : 0xd9a13b);
     instFerns.setColorAt(placedFerns, cColor);
     placedFerns++;
   }
