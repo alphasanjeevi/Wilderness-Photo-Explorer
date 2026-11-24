@@ -72,7 +72,7 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
       <div className="flex items-start justify-between gap-3">
         {/* Top-left reserve status & rotatable minimap */}
         <div className="flex flex-col items-start gap-2.5">
-          <div className="bg-[#182219]/90 border border-[#F4EFE6]/12 rounded-xl px-4 py-2.5 shadow-md">
+          <div className="bg-[#182219]/90 border border-[#F4EFE6]/12 rounded-xl px-4 py-2.5 shadow-md min-w-[232px]">
             <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[#F4EFE6]">
               <span>{telemetry.habitatLabel}</span>
               <span className="text-[#F4EFE6]/40" aria-hidden="true">·</span>
@@ -90,6 +90,44 @@ export const DrivingHud: React.FC<DrivingHudProps> = ({
                   <span className="text-[#9FD896]">{telemetry.nearestCue}</span>
                 </>
               )}
+            </div>
+
+            {/* Subtle Daylight Cycle Progress Bar */}
+            <div
+              className="mt-2 pt-1.5 border-t border-[#F4EFE6]/10"
+              aria-label={`Daylight cycle: ${telemetry.timeLabel}`}
+            >
+              <div className="relative h-1.5 w-full rounded-full overflow-hidden bg-[#101811]">
+                <div
+                  className="absolute inset-0 opacity-85"
+                  style={{
+                    background:
+                      'linear-gradient(90deg, #88C5DF 0%, #DFDF9E 45%, #D9822B 76%, #88C5DF 100%)',
+                  }}
+                />
+                {/* Phase transition ticks at 35% (Midday) and 65% (Golden Dusk) */}
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-[#182219]/75"
+                  style={{ left: '35%' }}
+                />
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-[#182219]/75"
+                  style={{ left: '65%' }}
+                />
+              </div>
+              <div className="relative h-1.5 -mt-1.5 pointer-events-none">
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-1.5 h-2.5 rounded-[2px] bg-[#F4EFE6] border border-[#182219] shadow-sm"
+                  style={{
+                    left: `${Math.max(2, Math.min(98, telemetry.timeNormalized * 100))}%`,
+                  }}
+                />
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[10px] text-[#D8D2C5]/65">
+                <span>Morning</span>
+                <span>Noon</span>
+                <span>Dusk</span>
+              </div>
             </div>
           </div>
 
